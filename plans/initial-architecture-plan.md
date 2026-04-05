@@ -1082,6 +1082,12 @@ Recommended auth config:
 - `auth.password` string
 - values can come from env vars or config file
 
+Separation rule:
+
+- auth config is separate from the persisted `configs` table
+- auth config should not be stored in database config
+- auth credentials remain bootstrap/runtime settings only
+
 Rules:
 
 - if `auth.enabled = false`, no auth middleware is enforced
@@ -1253,12 +1259,15 @@ Semantics:
 - `value` is replaced atomically on update, not patched field-by-field in SQL
 - Walens should treat this table as a single-row config store in practice
 - when the table is empty during boot, Walens should insert the default config immediately
+- application config should be managed from this table only, not through layered app-config sources
+- auth settings and similar bootstrap/runtime-only settings should stay outside this table
 
 Recommended operational rule:
 
 - startup loads the config row if present
 - if absent, startup inserts default values and uses them as active config
 - config writes replace the entire `value` column in one atomic operation
+- prefer simple consistency over config caching complexity; reading the config row again for relevant operations is acceptable
 
 Note for SQLite:
 
@@ -1314,6 +1323,7 @@ Expected behavior:
 - `GetConfig` returns the active persisted config object
 - `UpdateConfig` replaces the entire config value atomically
 - if config row does not exist yet, service may initialize it from defaults before returning or updating
+- auth config is not managed by these routes/services
 
 ### SQLite driver
 
@@ -1333,6 +1343,17 @@ Plan:
 - embed migrations into binary for production use
 - execute migrations automatically on startup
 - optionally add a migrate-only CLI mode later
+
+Migration ordering rule:
+
+- the very first migration should contain SQLite optimizations and best-practice setup only
+- that first migration is the place for SQLite-specific baseline setup that should exist before business tables
+- business/domain schema migrations should start from the second migration onward
+
+Recommended split:
+
+- migration 1: SQLite setup and operational best practices
+- migration 2+: configs, devices, sources, schedules, subscriptions, wallpapers, images, image_locations, jobs, and later business schema changes
 
 ### SQLite pragmas
 
@@ -1434,25 +1455,26 @@ Recommended target outcome:
 
 Recommended runtime config:
 
-- one config file, env vars, and persisted database config row
+- application config lives in the persisted database config row
 - one data directory for SQLite and future app-managed files
-- optional auth toggle with static username/password credentials
+- separate bootstrap/runtime auth toggle with static username/password credentials
 - configurable server base path for subpath deployment
 
-Config layering recommendation:
+Config management rule:
 
-- code defaults provide the initial config object
-- database `configs` row stores the active persisted app config
-- env vars or startup config file may still be used for bootstrap-only concerns if needed
+- use the `configs` table as the single source of truth for application config
 - when `configs` is empty, startup should insert the default config into the table
+- updates replace the full config value atomically
+- avoid layered app-config merging logic because it adds complexity with low payoff
+- do not mix auth credentials into persisted application config
 
-Recommended auth config fields:
+Recommended bootstrap/runtime auth fields:
 
 - `WALENS_AUTH_ENABLED`
 - `WALENS_AUTH_USERNAME`
 - `WALENS_AUTH_PASSWORD`
 
-Recommended server path config fields:
+Recommended bootstrap/runtime server path fields:
 
 - `WALENS_SERVER_BASE_PATH`
 
@@ -1480,9 +1502,10 @@ Examples:
 2. Add auth config loading and optional auth middleware.
 3. Add migration runner.
 4. Add runtime manager for HTTP server, scheduler, queue, and job runner in one process.
-5. Add initial schema for configs, devices, sources, source schedules, subscriptions, wallpapers, images, image_locations, and jobs.
-6. Add persisted config bootstrapping with default row injection.
-7. Add Jet generation script/tooling.
+5. Add first migration for SQLite optimizations and best practices.
+6. Add business schema migrations for configs, devices, sources, source schedules, subscriptions, wallpapers, images, image_locations, and jobs.
+7. Add persisted config bootstrapping with default row injection.
+8. Add Jet generation script/tooling.
 
 ### Phase 2 - Domain and API
 
@@ -1631,6 +1654,7 @@ If implementation starts now, the best order is:
 After planning, the next concrete implementation package should ideally produce:
 
 - runnable one-process Go server skeleton
+- first migration for SQLite setup and best practices
 - migration set for configs, devices, sources, schedules, subscriptions, wallpapers, images, image_locations, and jobs
 - Jet generation script/prototype
 - scheduler/queue/runner skeleton wired into app lifecycle
