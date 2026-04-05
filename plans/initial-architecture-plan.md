@@ -281,6 +281,7 @@ Suggested columns:
 
 - `id` TEXT primary key
 - `name` TEXT not null
+- `slug` TEXT not null
 - `screen_width` INTEGER not null
 - `screen_height` INTEGER not null
 - `min_image_width` INTEGER not null default 0
