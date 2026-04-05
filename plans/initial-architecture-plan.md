@@ -111,6 +111,23 @@ Walens should be designed around operational simplicity first.
 - Prefer hard link creation for additional device-visible paths, then fallback to file copy.
 - Track all image file locations on disk for later cleanup.
 - Query wallpapers for a specific device using device filters and subscribed sources.
+- Support optional Basic Auth for self-hosted protection, configurable from env or config file.
+
+### Product posture
+
+Walens should stay intentionally small in scope.
+
+- not a user platform
+- not a collaborative system
+- not a content management product
+- not a workflow-heavy business app
+
+Core purpose only:
+
+- run wallpaper collection jobs on schedule
+- filter images that match device constraints
+- download and store images efficiently
+- expose a small self-hosted web UI for managing that flow
 
 ### Explicit non-goals for now
 
@@ -118,7 +135,8 @@ Walens should be designed around operational simplicity first.
 - Multi-node scheduling.
 - External queue broker.
 - Distributed workers.
-- User accounts and auth.
+- User accounts, user management, and web-editable credentials.
+- roles, permissions, sessions, profiles, invitations, or any account lifecycle features.
 - Multi-tenant permissions.
 - Advanced recommendation/ranking.
 - Complex local binary asset pipeline beyond what is required for initial sync/download behavior.
@@ -154,6 +172,28 @@ Single process only:
 - one SQLite connection pool / database handle
 
 No separate worker binary should be required.
+
+### Access control model
+
+Walens should support optional simple access protection suitable for self-hosted deployments.
+
+Rules:
+
+- Basic Auth support is optional and can be disabled entirely.
+- Auth is configured only through config file or env vars.
+- Username/password cannot be changed from the web UI.
+- When auth is enabled, request validation should:
+  1. first check `Authorization` header
+  2. if absent, check HTTP-only auth cookie
+  3. reject with `401` if credentials are invalid or missing
+- Browser users without valid cookie should be able to reach a simple login page.
+- Future mobile or external clients are expected to use the `Authorization` header.
+
+Security intent:
+
+- not state-of-the-art identity or session management
+- good enough to reduce casual brute force, bot crawling, and unwanted access to potentially adult content
+- should be understood as deployment protection only, not application-level user management
 
 ## Dependency Constraints
 
@@ -733,70 +773,155 @@ For phase 1:
 
 ## Backend API Plan
 
-### Device endpoints
+### Route prefix and base path rules
 
-- `GET /api/devices`
-- `POST /api/devices`
-- `GET /api/devices/{id}`
-- `PATCH /api/devices/{id}`
-- `DELETE /api/devices/{id}`
+Walens should support a configurable deployment base path.
 
-### Source implementation metadata endpoints
+Rules:
 
-- `GET /api/source-types`
-  - list registered source implementation types from codebase
-- `GET /api/source-types/{type}`
-  - show validation/schema metadata for one source type, with params exposed as JSON Schema via `*huma.Schema`
+- default base path is `/`
+- user can configure another base path, for example `/walens`
+- frontend asset serving, SPA fallback, login page, and API routes must all honor the configured base path
+- if base path is `/walens`, API routes become `/walens/api/...`
+- Vite dev mounting and production asset serving must both work correctly when base path is not `/`
 
-### Configured source endpoints
+Recommended config:
 
-- `GET /api/sources`
-- `POST /api/sources`
-- `GET /api/sources/{id}`
-- `PATCH /api/sources/{id}`
-- `DELETE /api/sources/{id}`
+- `server.base_path`
 
-### Source schedule endpoints
+Examples:
 
-- `GET /api/sources/{id}/schedules`
-- `POST /api/sources/{id}/schedules`
-- `PATCH /api/sources/{id}/schedules/{scheduleId}`
-- `DELETE /api/sources/{id}/schedules/{scheduleId}`
+- base path `/` -> API prefix `/api`
+- base path `/walens` -> API prefix `/walens/api`
 
-### Subscription endpoints
+### RPC routing convention
 
-- `GET /api/devices/{id}/subscriptions`
-- `POST /api/devices/{id}/subscriptions`
-- `PATCH /api/devices/{id}/subscriptions/{subscriptionId}`
-- `DELETE /api/devices/{id}/subscriptions/{subscriptionId}`
+Backend API should use RPC-style route naming.
 
-### Wallpaper endpoints
+Pattern:
 
-- `GET /api/devices/{id}/wallpapers`
-- `GET /api/wallpapers/{id}`
+- `{prefix}/{version}/{domain}/{MethodName}`
 
-### Image endpoints
+Where:
 
-- `GET /api/images`
+- `{prefix}` is `/api` under the configured base path
+- `{version}` starts with `v1`
+- `{domain}` is the logical service area, for example `images`, `devices`, `sources`
+- `{MethodName}` is a PascalCase RPC-style operation name
+
+Examples:
+
+- `POST /api/v1/images/ListImages`
+- `POST /walens/api/v1/images/ListImages`
+
+### HTTP method convention
+
+Rules:
+
+- all normal backend methods are `POST`
+- all normal backend methods use JSON request body
+- this includes list, get, search, delete, favorite, and sync-style operations
+- only explicit exceptions such as health check, scalar/openapi UI, static assets, login page delivery, and similar infrastructure routes may use non-`POST` methods
+
+Rationale:
+
+- keeps backend API convention uniform
+- aligns with RPC-style naming
+- avoids route-shape drift between read and write operations
+
+### Auth endpoints
+
+- `GET {base}/login`
+  - serves simple login page when auth is enabled
+- `POST {base}/auth/login`
+  - validates configured credentials and sets HTTP-only cookie for browser use
+- `POST {base}/auth/logout`
+  - clears auth cookie
+
+### Documentation endpoints
+
+- `GET {base}/docs`
+  - hosts Scalar UI
+- `GET {base}/openapi.json`
+  - hosts OpenAPI JSON
+- `GET {base}/openapi.yaml`
+  - hosts OpenAPI YAML
+
+Base-path examples:
+
+- base path `/` -> `/docs`, `/openapi.json`, `/openapi.yaml`
+- base path `/walens` -> `/walens/docs`, `/walens/openapi.json`, `/walens/openapi.yaml`
+
+Important rule:
+
+- these documentation endpoints are always mounted under the configured base path prefix and must never assume root-only deployment
+
+### API methods by domain
+
+All examples below assume base path `/`.
+
+#### Devices
+
+- `POST /api/v1/devices/ListDevices`
+- `POST /api/v1/devices/GetDevice`
+- `POST /api/v1/devices/CreateDevice`
+- `POST /api/v1/devices/UpdateDevice`
+- `POST /api/v1/devices/DeleteDevice`
+
+#### Source Types
+
+- `POST /api/v1/source_types/ListSourceTypes`
+- `POST /api/v1/source_types/GetSourceType`
+  - returns validation/schema metadata for one source type, with params exposed as JSON Schema via `*huma.Schema`
+
+#### Sources
+
+- `POST /api/v1/sources/ListSources`
+- `POST /api/v1/sources/GetSource`
+- `POST /api/v1/sources/CreateSource`
+- `POST /api/v1/sources/UpdateSource`
+- `POST /api/v1/sources/DeleteSource`
+- `POST /api/v1/sources/SyncSource`
+  - creates manual source sync job and enqueues it
+
+#### Source Schedules
+
+- `POST /api/v1/source_schedules/ListSourceSchedules`
+- `POST /api/v1/source_schedules/CreateSourceSchedule`
+- `POST /api/v1/source_schedules/UpdateSourceSchedule`
+- `POST /api/v1/source_schedules/DeleteSourceSchedule`
+
+#### Device Subscriptions
+
+- `POST /api/v1/device_subscriptions/ListDeviceSubscriptions`
+- `POST /api/v1/device_subscriptions/CreateDeviceSubscription`
+- `POST /api/v1/device_subscriptions/UpdateDeviceSubscription`
+- `POST /api/v1/device_subscriptions/DeleteDeviceSubscription`
+
+#### Wallpapers
+
+- `POST /api/v1/wallpapers/ListDeviceWallpapers`
+- `POST /api/v1/wallpapers/GetWallpaper`
+
+#### Images
+
+- `POST /api/v1/images/ListImages`
   - supports filters for adult flag, favorite, file size, width, height, uploader, artist, origin URL, and original ID
-- `GET /api/images/{id}`
-- `PATCH /api/images/{id}/favorite`
-  - mark or unmark favorite
-- `DELETE /api/images/{id}`
+- `POST /api/v1/images/GetImage`
+- `POST /api/v1/images/SetImageFavorite`
+- `POST /api/v1/images/DeleteImage`
   - best-effort delete all tracked disk locations and then remove the image record
 
-### Job endpoints
+#### Jobs
 
-- `GET /api/jobs`
-- `GET /api/jobs/{id}`
-- `POST /api/sources/{id}/sync`
-  - create manual source sync job and enqueue it
+- `POST /api/v1/jobs/ListJobs`
+- `POST /api/v1/jobs/GetJob`
 
-### Admin/runtime endpoints
+#### Admin / Runtime
 
-- `POST /api/admin/scheduler/reload`
-  - optional debug/admin endpoint
-- `GET /api/admin/runtime`
+- `POST /api/v1/admin/ReloadScheduler`
+  - optional debug/admin method
+- `POST /api/v1/admin/GetRuntimeStatus`
   - optional runtime status including queue size, scheduler state, workers
 
 ### OpenAPI strategy
@@ -805,6 +930,73 @@ For phase 1:
 - Frontend client is generated from the emitted OpenAPI document.
 - DTOs stay separate from database models.
 - Database field documentation should be descriptive enough that generated model metadata can later enrich API docs where appropriate.
+
+## Auth Plan
+
+### Config model
+
+Recommended auth config:
+
+- `auth.enabled` boolean
+- `auth.username` string
+- `auth.password` string
+- values can come from env vars or config file
+
+Rules:
+
+- if `auth.enabled = false`, no auth middleware is enforced
+- if `auth.enabled = true`, both frontend and API routes should be protected except the login route and static assets required to render it
+- credentials are read-only at runtime from config/env and are not editable via UI or API
+- there is no user table and no account model in the application
+
+### Request auth behavior
+
+When auth is enabled:
+
+1. inspect `Authorization` header for Basic credentials
+2. if header is missing, inspect HTTP-only auth cookie
+3. validate against configured username/password
+4. reject with `401` when invalid
+
+Recommended browser behavior:
+
+- browser login page submits credentials to a login endpoint
+- server validates credentials and sets an HTTP-only cookie
+- subsequent browser requests can authenticate via cookie
+- login page route should also honor configured base path, for example `/walens/login`
+
+Recommended API/client behavior:
+
+- non-browser clients and future mobile app use `Authorization` header directly
+
+### Cookie/session model
+
+Keep this intentionally simple.
+
+Recommendation:
+
+- use signed or opaque cookie value derived from configured credentials or server-side auth secret
+- mark cookie as HTTP-only
+- use `Secure` when served over HTTPS
+- add `SameSite` policy appropriate for same-host deployment
+
+Since the target deployment is same-host frontend + backend, a minimal cookie model is acceptable.
+
+Important scope boundary:
+
+- this is not login tied to per-user identity
+- this is only a thin protection layer in front of a single-user/self-hosted app
+
+### Login UI behavior
+
+- if auth is enabled and browser request has no valid cookie, show simple login page
+- login page is only for browser/self-hosted UI access
+- after successful login, redirect to app shell
+
+### Logout behavior
+
+- provide a simple logout endpoint that clears auth cookie
+- this is optional for phase 1 UI but recommended
 
 ## Go-Jet Customization Plan
 
@@ -914,11 +1106,13 @@ Primary screens:
 - Job page shows status, run time, duration, counts, and error reason.
 - Wallpaper grid shows preview, source, resolution, aspect ratio, and adult badge.
 - Source param UI should be able to evolve from raw JSON editing into schema-driven forms using `*huma.Schema` / JSON Schema.
+- when auth is enabled, browser users without valid auth cookie should see a simple login page before entering the app
 
 ### Initial simplification
 
 - Use validated JSON textarea for source params before building schema-driven forms.
 - Show schedule proximity warnings as plain UI alerts first.
+- Keep login UI intentionally minimal: username, password, submit, and invalid-credential message.
 
 ## Dev Server Integration Plan
 
@@ -927,11 +1121,19 @@ Using `github.com/olivere/vite`:
 - in development, Go server mounts or proxies Vite dev server assets
 - in production, Go server serves built frontend assets from embedded files or packaged static directory
 - API and frontend remain same-origin
+- configured base path must be honored by both dev and prod asset serving
+- Vite integration must work correctly when app is mounted under non-root paths such as `/walens`
 
 Recommended route split:
 
-- `/api/*` served by Huma
-- non-API routes served by SPA fallback
+- `{base}/api/*` served by Huma
+- `{base}/login` served by login UI when auth is enabled
+- `{base}/docs`, `{base}/openapi.json`, and `{base}/openapi.yaml` served as documentation endpoints
+- other `{base}/*` non-API routes served by SPA fallback
+
+Important note:
+
+- frontend asset URLs, router base, and backend-mounted Vite asset paths must all be derived from the same configured base path to avoid broken assets when deploying under a subpath
 
 ## Build and Deployment Plan
 
@@ -963,6 +1165,18 @@ Recommended runtime config:
 
 - one config file or env vars
 - one data directory for SQLite and future app-managed files
+- optional auth toggle with static username/password credentials
+- configurable server base path for subpath deployment
+
+Recommended auth config fields:
+
+- `WALENS_AUTH_ENABLED`
+- `WALENS_AUTH_USERNAME`
+- `WALENS_AUTH_PASSWORD`
+
+Recommended server path config fields:
+
+- `WALENS_SERVER_BASE_PATH`
 
 Examples:
 
@@ -980,14 +1194,16 @@ Examples:
 4. Verify Go-Jet generation workflow against SQLite schema and confirm customization path.
 5. Verify cross-compilation and release packaging for 6 targets.
 6. Verify cron parser/library is pure Go and suitable for reloadable schedules.
+7. Verify base-path mounting works for API routes, login page, SPA fallback, and Vite-served assets.
 
 ### Phase 1 - Runtime skeleton
 
 1. Create app bootstrap, config, logging, database connection, and health endpoint.
-2. Add migration runner.
-3. Add runtime manager for HTTP server, scheduler, queue, and job runner in one process.
-4. Add initial schema for devices, sources, source schedules, subscriptions, wallpapers, images, image_locations, and jobs.
-5. Add Jet generation script/tooling.
+2. Add auth config loading and optional auth middleware.
+3. Add migration runner.
+4. Add runtime manager for HTTP server, scheduler, queue, and job runner in one process.
+5. Add initial schema for devices, sources, source schedules, subscriptions, wallpapers, images, image_locations, and jobs.
+6. Add Jet generation script/tooling.
 
 ### Phase 2 - Domain and API
 
@@ -1017,12 +1233,13 @@ Examples:
 
 1. Scaffold SvelteKit SPA.
 2. Integrate generated API client.
-3. Build devices UI.
-4. Build source and schedule UI.
-5. Build subscriptions UI.
-6. Build jobs UI.
-7. Build wallpaper gallery UI.
-8. Build image management UI with search, filter, favorite, and delete flow.
+3. Build simple login UI and cookie-based browser auth flow.
+4. Build devices UI.
+5. Build source and schedule UI.
+6. Build subscriptions UI.
+7. Build jobs UI.
+8. Build wallpaper gallery UI.
+9. Build image management UI with search, filter, favorite, and delete flow.
 
 ### Phase 6 - Packaging
 
@@ -1100,6 +1317,17 @@ Recommendation:
 
 - explicitly test hard-link create/delete behavior on Windows, Linux, macOS, and Docker bind mounts
 - keep copy fallback as a first-class supported path
+
+### 7. Basic Auth simplicity vs security
+
+This auth layer is intentionally simple and should be treated as deployment protection, not a full identity system.
+
+Recommendation:
+
+- keep credential handling simple and explicit
+- document that credentials are configured outside the app and not editable from UI
+- focus on reducing casual abuse, crawler access, and exposure of adult content rather than advanced threat resistance
+- do not expand this into user management unless product scope changes substantially
 
 ## Recommended First Implementation Order
 
