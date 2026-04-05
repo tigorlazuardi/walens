@@ -65,20 +65,24 @@ Walens should be designed around operational simplicity first.
    - Connects a device to a row in `sources`.
    - This is what makes the device a candidate when that source row runs on schedule.
 
-5. **Wallpaper**
-   - Persisted normalized wallpaper metadata catalog.
-   - Used to answer filtered wallpaper queries for devices.
-
-6. **Image**
+5. **Image**
    - Persisted downloaded image identity record.
    - Uses source-provided `unique_id` for best-effort dedupe.
    - Represents canonical local image content when a file has already been downloaded.
+
+6. **Image Assignment**
+   - Persisted relation between an image and a device.
+   - Used to track whether an image is already assigned to a given device.
 
 7. **Image Location**
    - Persisted tracker for every file path on disk that points to an image.
    - Supports hard-link tracking and cleanup.
 
-8. **Job**
+8. **Image Blacklist**
+   - Persisted deny-list keyed by source image unique identifier.
+   - Prevents future download/redownload of blacklisted images.
+
+9. **Job**
    - Persisted execution record for source sync/download jobs.
    - Created for a `sources` row, not directly for a source implementation type.
    - Stores requested work, runtime status, timings, counts, and errors.
@@ -105,12 +109,12 @@ Walens should be designed around operational simplicity first.
 - Run queue and job runner in-process.
 - Persist jobs in database.
 - Requeue unfinished jobs on boot.
-- Ingest wallpapers from source-row jobs into local SQLite database.
+- Download and persist images from source-row jobs into local SQLite database.
 - Perform best-effort dedupe on downloaded images using source-provided `unique_id`.
 - Reuse existing local image files across devices without redownload when possible.
 - Prefer hard link creation for additional device-visible paths, then fallback to file copy.
 - Track all image file locations on disk for later cleanup.
-- Query wallpapers for a specific device using device filters and subscribed sources.
+- Query images for a specific device using device filters and subscribed sources.
 - Support optional Basic Auth for self-hosted protection, configurable from env or config file.
 
 ### Product posture
@@ -245,7 +249,6 @@ walens/
       source_schedules/
       source_types/
       sources/
-      wallpapers/
     services/
       configs/
       devices/
@@ -254,7 +257,6 @@ walens/
       source_schedules/
       source_types/
       sources/
-      wallpapers/
     scheduler/
     queue/
     runner/
@@ -368,39 +370,7 @@ Constraints:
 
 - unique index on `(device_id, source_id)`
 
-### 5. `wallpapers`
-
-Suggested columns:
-
-- `id` TEXT primary key
-- `source_id` TEXT not null references `sources(id)` on delete cascade
-- `source_type` TEXT not null
-- `source_item_identifier` TEXT not null
-- `original_url` TEXT not null
-- `preview_url` TEXT
-- `width` INTEGER not null
-- `height` INTEGER not null
-- `aspect_ratio` REAL not null
-- `is_adult` INTEGER not null default 0
-- `json_meta` TEXT not null default '{}'
-- `created_at` INTEGER not null
-- `updated_at` INTEGER not null
-
-Constraints:
-
-- unique index on `(source_id, source_item_identifier)`
-- optional dedupe index on `original_url` later if source stability is confirmed
-
-Naming note:
-
-- `source_item_identifier` is intentionally named with `identifier` instead of `id` because it is owned by the external source, not by Walens internal database identity.
-
-Tag note:
-
-- tags should not be stored in `json_tags`
-- image/tag metadata should use dedicated relational tables for better dedupe and filtering
-
-### 6. `images`
+### 5. `images`
 
 This table stores canonical downloaded image identity records.
 
@@ -408,10 +378,12 @@ Suggested columns:
 
 - `id` TEXT primary key
 - `source_id` TEXT references `sources(id)`
-- `wallpaper_id` TEXT references `wallpapers(id)`
 - `unique_id` TEXT not null
+- `source_type` TEXT not null
 - `original_filename` TEXT
+- `preview_url` TEXT
 - `origin_url` TEXT
+- `source_item_identifier` TEXT
 - `original_identifier` TEXT
 - `uploader` TEXT
 - `artist` TEXT
@@ -419,6 +391,7 @@ Suggested columns:
 - `file_size_bytes` INTEGER
 - `width` INTEGER
 - `height` INTEGER
+- `aspect_ratio` REAL
 - `is_adult` INTEGER not null default 0
 - `is_favorite` INTEGER not null default 0
 - `json_meta` TEXT not null default '{}'
@@ -431,12 +404,17 @@ Semantics:
 - `unique_id` is best effort only.
 - duplicates can still exist in reality if the source emits unstable IDs or different sources describe the same file differently.
 - `original_identifier` should be used for external/source-owned identifiers rather than `original_id`.
+- `source_item_identifier` is the external source item/post identifier, not an internal Walens ID.
 
 Constraints:
 
 - unique index on `(source_id, unique_id)` is recommended for phase 1.
 
-### 7. `tags`
+Tag note:
+
+- image/tag metadata should use dedicated relational tables for better dedupe and filtering
+
+### 6. `tags`
 
 This table stores unique tags in normalized relational form.
 
@@ -457,7 +435,7 @@ Semantics:
 - `normalized_name` should be a case-insensitive canonical form, for example lowercase trimmed text
 - tag uniqueness should be enforced case-insensitively through `normalized_name`
 
-### 8. `image_tags`
+### 7. `image_tags`
 
 Join table between images and tags.
 
@@ -472,6 +450,28 @@ Constraints:
 
 - unique index on `(image_id, tag_id)`
 
+### 8. `image_assignments`
+
+This table tracks which devices an image has been assigned to.
+
+Suggested columns:
+
+- `id` TEXT primary key
+- `image_id` TEXT not null references `images(id)` on delete cascade
+- `device_id` TEXT not null references `devices(id)` on delete cascade
+- `created_at` INTEGER not null
+- `updated_at` INTEGER not null
+
+Constraints:
+
+- unique index on `(image_id, device_id)`
+
+Semantics:
+
+- assignment is device-specific state
+- assignment may exist even when the file is temporarily missing on disk
+- assignment state is used by the runner to decide skip, redownload, or materialize behavior
+
 ### 9. `image_locations`
 
 This table tracks every concrete file path on disk for an image.
@@ -480,7 +480,7 @@ Suggested columns:
 
 - `id` TEXT primary key
 - `image_id` TEXT not null references `images(id)` on delete cascade
-- `device_id` TEXT references `devices(id)`
+- `device_id` TEXT not null references `devices(id)` on delete cascade
 - `path` TEXT not null
 - `storage_kind` TEXT not null
 - `is_primary` INTEGER not null default 0
@@ -494,10 +494,11 @@ Suggested enum-like values:
 
 Semantics:
 
-- `canonical` is the first locally stored file path for the image.
+- `canonical` is the first device-specific stored file path for the image.
 - `hardlink` is an additional filesystem path pointing to the same content through a hard link.
 - `copy` is fallback storage when hard links cannot be created.
-- `device_id` is optional because some files may be shared/global rather than tied to one device path.
+- image locations are always tracked per device because filesystem placement is device-oriented by design.
+- one image can appear in many device-specific paths.
 
 Constraints:
 
@@ -529,7 +530,29 @@ Semantics:
 - thumbnails are optimized for UI listing and preview, not for device assignment
 - deleting an image should also delete its thumbnail file if present
 
-### 11. `jobs`
+### 11. `image_blacklists`
+
+This table blocks download of known unwanted images.
+
+Suggested columns:
+
+- `id` TEXT primary key
+- `source_id` TEXT references `sources(id)` on delete cascade
+- `unique_id` TEXT not null
+- `reason` TEXT
+- `created_at` INTEGER not null
+- `updated_at` INTEGER not null
+
+Constraints:
+
+- unique index on `(source_id, unique_id)`
+
+Semantics:
+
+- blacklist is checked before any download begins
+- if a unique identifier is blacklisted, that image must never be downloaded or redownloaded for that source
+
+### 12. `jobs`
 
 Jobs are first-class persisted records.
 
@@ -551,7 +574,9 @@ Suggested columns:
 - `reused_image_count` INTEGER not null default 0
 - `hardlinked_image_count` INTEGER not null default 0
 - `copied_image_count` INTEGER not null default 0
-- `stored_wallpaper_count` INTEGER not null default 0
+- `stored_image_count` INTEGER not null default 0
+- `skipped_image_count` INTEGER not null default 0
+- `message` TEXT
 - `error_message` TEXT
 - `json_input` TEXT not null default '{}'
 - `json_result` TEXT not null default '{}'
@@ -571,12 +596,15 @@ Notes:
 - `reused_image_count` captures how many images were satisfied from existing local content.
 - `hardlinked_image_count` captures how many output paths were created as hard links.
 - `copied_image_count` captures how many output paths required copy fallback.
+- `stored_image_count` captures how many image records were persisted or updated.
+- `skipped_image_count` captures how many candidate items were skipped during processing.
+- `message` stores non-error informational result text for cases such as "did not run because no enabled devices subscribe to this source".
 - `duration_ms` stores job duration in integer milliseconds using the duration wrapper convention.
 - `error_message` stores summarized terminal failure reason.
 - `json_input` stores source params / execution request snapshot.
 - `json_result` stores extensible metadata such as source cursor, warnings, or counts by category.
 
-### 12. `job_attempts` (optional)
+### 13. `job_attempts` (optional)
 
 Do not create this in phase 1 unless retry complexity grows.
 
@@ -737,14 +765,52 @@ Rationale:
 - Resolve source configuration from DB.
 - Invoke source implementation fetch iterator.
 - Persist results, counts, errors, and timings.
-- Store discovered wallpapers.
 - Resolve or create `images` rows using source-provided `unique_id`.
 - Reuse existing local image content without redownload when possible.
 - Generate thumbnail file after successful canonical image download or reuse when thumbnail is missing.
 - Materialize target file paths using hard links first, then copy fallback.
+- Persist device assignment state into `image_assignments`.
 - Persist all tracked file paths into `image_locations`.
 - Persist thumbnail metadata/path into `image_thumbnails`.
 - Mark terminal status.
+
+### Background fetch/run flow
+
+The background source runner should follow this behavior:
+
+1. check whether the source row is enabled
+2. if disabled, exit immediately and do not create any job log
+3. when cron triggers for an enabled source, load enabled subscribed device candidates
+4. if no enabled subscribed devices exist, create a job log with an English message like `did not run because no enabled devices subscribe to this source`
+5. start fetching image metadata from the source
+6. compare each fetched image metadata item against the candidate devices
+7. if no devices match, skip that item and continue
+8. if at least one device matches, send the image metadata plus eligible device list into downstream processing
+
+### Assignment/materialization rules
+
+For each eligible `(image, device)` combination, the worker should apply these rules:
+
+1. if the image is already assigned to that device and the file exists on disk, skip
+2. if the image is already assigned to that device but the file is missing on disk, download/materialize it again for that device
+3. if the image is assigned to another device but not this device, create hard link if possible, otherwise copy
+4. if the image is assigned to another device but the source file is missing, download for the current device and assign only to the current device
+
+Important rule:
+
+- do not implicitly reassign other devices during recovery of one missing file path
+
+### Blacklist behavior
+
+- before download starts, check `image_blacklists` using the relevant `(source_id, unique_id)`
+- if blacklisted, never download or redownload that image
+- blacklisted items may still count against source lookup budget, but must not proceed into download
+
+### Download behavior
+
+- download into a temporary location first
+- only after successful completion should the file be moved or copied into the first device image location
+- thumbnail generation happens after the canonical device file is available
 
 Fetch/worker note:
 
@@ -788,8 +854,16 @@ Important operational notes:
 
 Recommended storage layout:
 
-- keep canonical images and per-device materialized paths under the same data directory when possible
-- this maximizes chance that hard-linking works across supported deployments
+- keep all device image paths under the same data directory when possible
+- store device image files with this pattern:
+
+```text
+{base_dir}/images/{device_slug}/{image_unique_id}.{ext}
+```
+
+- this layout is intentional so syncing tools such as `rsync` and `syncthing` can mirror device-specific directories easily
+- image location tracking is required because one image can exist in many device-specific paths
+- same-filesystem placement still maximizes chance that hard-linking works across supported deployments
 
 ### Thumbnail generation
 
@@ -840,25 +914,25 @@ This preserves single-process simplicity while preventing early race complexity 
 
 ## Filtering Rules Plan
 
-For device wallpaper selection:
+For device image selection:
 
-1. Wallpaper must come from a source the device subscribes to.
-2. If device `is_adult_allowed = false`, wallpaper with `is_adult = true` must be excluded.
-3. Wallpaper aspect ratio must fall within device tolerance.
-4. Wallpaper resolution should be at least device size unless an optional fallback mode is introduced later.
+1. Image must come from a source the device subscribes to.
+2. If device `is_adult_allowed = false`, image with `is_adult = true` must be excluded.
+3. Image aspect ratio must fall within device tolerance.
+4. Image resolution should be at least device size unless an optional fallback mode is introduced later.
 5. Device explicit min/max image dimension and filesize bounds must be respected when set.
 6. Source and subscription must both be enabled.
 7. Tag filtering should be supported through relational tag tables, not JSON arrays.
 
 Suggested SQL-level checks:
 
-- `wallpaper.width >= device.screen_width`
-- `wallpaper.height >= device.screen_height`
-- `ABS(wallpaper.aspect_ratio - CAST(device.screen_width AS REAL) / device.screen_height) <= device.aspect_ratio_tolerance`
-- `(device.min_image_width = 0 OR wallpaper.width >= device.min_image_width)`
-- `(device.max_image_width = 0 OR wallpaper.width <= device.max_image_width)`
-- `(device.min_image_height = 0 OR wallpaper.height >= device.min_image_height)`
-- `(device.max_image_height = 0 OR wallpaper.height <= device.max_image_height)`
+- `image.width >= device.screen_width`
+- `image.height >= device.screen_height`
+- `ABS(image.aspect_ratio - CAST(device.screen_width AS REAL) / device.screen_height) <= device.aspect_ratio_tolerance`
+- `(device.min_image_width = 0 OR image.width >= device.min_image_width)`
+- `(device.max_image_width = 0 OR image.width <= device.max_image_width)`
+- `(device.min_image_height = 0 OR image.height >= device.min_image_height)`
+- `(device.max_image_height = 0 OR image.height <= device.max_image_height)`
 - `(device.min_filesize = 0 OR image.file_size_bytes >= device.min_filesize)`
 - `(device.max_filesize = 0 OR image.file_size_bytes <= device.max_filesize)`
 
@@ -899,8 +973,7 @@ Recommended additional columns on `images`:
 
 Notes:
 
-- some values may duplicate normalized wallpaper fields, but keeping them on `images` can simplify operational image listing
-- alternatively, image list queries can join `wallpapers`; choose whichever keeps query complexity manageable
+- image metadata should live directly on `images` because there is no separate discovered-wallpaper phase
 
 ### Favorite behavior
 
@@ -1150,17 +1223,16 @@ All examples below assume base path `/`.
 - `POST /api/v1/device_subscriptions/UpdateDeviceSubscription`
 - `POST /api/v1/device_subscriptions/DeleteDeviceSubscription`
 
-#### Wallpapers
-
-- `POST /api/v1/wallpapers/ListDeviceWallpapers`
-- `POST /api/v1/wallpapers/GetWallpaper`
-
 #### Images
 
 - `POST /api/v1/images/ListImages`
   - supports filters for adult flag, favorite, file size, width, height, uploader, artist, origin URL, and original ID
 - `POST /api/v1/images/GetImage`
+- `POST /api/v1/images/ListDeviceImages`
+  - returns images matching device filters and device subscriptions
 - `POST /api/v1/images/SetImageFavorite`
+- `POST /api/v1/images/BlacklistImage`
+  - blacklists an image by source-specific unique identifier so it is never downloaded again
 - `POST /api/v1/images/DeleteImage`
   - best-effort delete all tracked disk locations and then remove the image record
 - `POST /api/v1/images/GetImageThumbnail`
@@ -1320,7 +1392,7 @@ ID mapping rules:
 
 - database columns named `id` map to `uuid.UUID`
 - database columns ending in `_id` map to `uuid.UUID`
-- this includes foreign keys such as `source_id`, `device_id`, `wallpaper_id`, and similar fields
+- this includes foreign keys such as `source_id`, `device_id`, `tag_id`, `image_id`, and similar fields
 - all internal IDs are UUIDv7 values generated by the application layer
 
 Naming rules for external identifiers:
@@ -1467,7 +1539,7 @@ Migration ordering rule:
 Recommended split:
 
 - migration 1: SQLite setup and operational best practices
-- migration 2+: configs, devices, sources, schedules, subscriptions, wallpapers, images, image_locations, jobs, and later business schema changes
+- migration 2+: configs, devices, sources, schedules, subscriptions, images, tags, image_tags, image_assignments, image_locations, image_thumbnails, image_blacklists, jobs, and later business schema changes
 
 ### SQLite pragmas
 
@@ -1487,6 +1559,12 @@ Need to validate WAL behavior across:
 ## Frontend Plan
 
 ### SPA structure
+
+Frontend should be designed mobile first.
+
+Core requirement:
+
+- the UI must feel smooth and usable on mobile devices first, then scale upward to larger viewports
 
 Primary screens:
 
@@ -1510,10 +1588,21 @@ Primary screens:
 - Source form selects source implementation type and edits params JSON.
 - Source detail page manages many cron schedules.
 - Job page shows status, run time, duration, counts, and error reason.
-- Wallpaper grid shows preview, source, resolution, aspect ratio, and adult badge.
+- image list/gallery should use masonry layout for previews
+- mobile phone view should render at least 2 masonry columns
+- wider viewports should dynamically increase column count based on available width
+- gallery/list views should stay smooth on mobile while browsing many images
+- image grid shows preview, source, resolution, aspect ratio, and adult badge.
 - image list/gallery views should prefer generated thumbnails over original files
 - Source param UI should be able to evolve from raw JSON editing into schema-driven forms using `*huma.Schema` / JSON Schema.
 - when auth is enabled, browser users without valid auth cookie should see a simple login page before entering the app
+
+### Frontend performance rule
+
+- frontend components should be as lazy-loaded as possible
+- components that pull heavy dependencies or expensive rendering logic must be lazy
+- image-heavy views should avoid eager rendering of non-visible content when possible
+- mobile performance is a first-class requirement, not an afterthought
 
 ### Initial simplification
 
@@ -1618,7 +1707,7 @@ Examples:
 3. Add migration runner.
 4. Add runtime manager for HTTP server, scheduler, queue, and job runner in one process.
 5. Add first migration for SQLite optimizations and best practices.
-6. Add business schema migrations for configs, devices, sources, source schedules, subscriptions, wallpapers, images, tags, image_tags, image_locations, image_thumbnails, and jobs.
+6. Add business schema migrations for configs, devices, sources, source schedules, subscriptions, images, tags, image_tags, image_assignments, image_locations, image_thumbnails, image_blacklists, and jobs.
 7. Add persisted config bootstrapping with default row injection.
 8. Add Jet generation script/tooling.
 
@@ -1641,11 +1730,11 @@ Examples:
 
 ### Phase 4 - Ingestion and Wallpapers
 
-1. Build normalized wallpaper model.
+1. Build normalized image metadata model.
 2. Implement one source first, ideally `BooruSource`.
-3. Persist wallpaper metadata from jobs.
-4. Implement image dedupe, local canonical storage, image location tracking, and thumbnail generation.
-5. Implement per-device filtered wallpaper query endpoint.
+3. Persist image metadata from jobs.
+4. Implement image dedupe, assignment tracking, device-oriented storage, image location tracking, blacklist checks, and thumbnail generation.
+5. Implement per-device filtered image query endpoint.
 
 ### Phase 5 - Frontend SPA
 
@@ -1656,8 +1745,9 @@ Examples:
 5. Build source and schedule UI.
 6. Build subscriptions UI.
 7. Build jobs UI.
-8. Build wallpaper gallery UI.
-9. Build image management UI with search, filter, favorite, and delete flow.
+8. Build mobile-first image gallery UI with responsive masonry layout.
+9. Add lazy-loading for heavy frontend components and image-heavy views.
+10. Build image management UI with search, filter, favorite, and delete flow.
 
 ### Phase 6 - Packaging
 
@@ -1722,8 +1812,10 @@ Walens now needs local downloaded file tracking with best-effort dedupe.
 
 Recommendation:
 
-- store canonical downloaded files locally
+- store device-oriented downloaded files locally
+- track assignment state in `image_assignments`
 - track all derived file paths in `image_locations`
+- maintain image blacklist state in `image_blacklists`
 - generate and track lightweight thumbnails for UI use
 - use hard links first and copy as fallback
 - treat dedupe as optimization, not correctness guarantee
@@ -1759,9 +1851,9 @@ If implementation starts now, the best order is:
 5. implement sources + schedules schema/API
 6. implement scheduler reload and warning detection
 7. implement jobs persistence + in-memory queue + runner
-8. implement images + image_locations + image_thumbnails schema and dedupe storage flow
+8. implement images + image_assignments + image_locations + image_thumbnails + image_blacklists schema and storage flow
 9. implement device and subscription schema/API
-10. implement wallpaper and image filtering query APIs
+10. implement image filtering query APIs
 11. scaffold SPA and connect typed client
 12. add first concrete source ingestion
 
@@ -1771,7 +1863,7 @@ After planning, the next concrete implementation package should ideally produce:
 
 - runnable one-process Go server skeleton
 - first migration for SQLite setup and best practices
-- migration set for configs, devices, sources, schedules, subscriptions, wallpapers, images, tags, image_tags, image_locations, image_thumbnails, and jobs
+- migration set for configs, devices, sources, schedules, subscriptions, images, tags, image_tags, image_assignments, image_locations, image_thumbnails, image_blacklists, and jobs
 - Jet generation script/prototype
 - scheduler/queue/runner skeleton wired into app lifecycle
 - Huma OpenAPI output
