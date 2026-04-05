@@ -321,8 +321,12 @@ Semantics:
 - `name` is the user-defined unique name of the source row in `sources`.
 - `source_type` is the code-registered source implementation name, for example `booru` or `reddit`.
 - `params` stores stringified JSON for that specific source row.
-- `lookup_count` controls how many candidate images the source row should try to fetch/look up per run.
+- `lookup_count` controls how many upstream source items/posts should be inspected per run.
 - if `lookup_count = 0`, Walens should use the default from the source implementation.
+- `lookup_count` is a lookup budget, not a guaranteed image result count.
+- non-image posts, skipped posts, and deduped results still count toward `lookup_count`.
+- this is important so users can control how much upstream data is read from a source and reduce the chance of hitting that source's rate limits.
+- example meaning: "check the latest 300 posts", not "return 300 downloadable images".
 - Devices subscribe to this source row by `source_id`.
 - Schedules also belong to this source row by `source_id`.
 
@@ -378,7 +382,6 @@ Suggested columns:
 - `height` INTEGER not null
 - `aspect_ratio` REAL not null
 - `is_adult` INTEGER not null default 0
-- `json_tags` TEXT not null default '[]'
 - `json_meta` TEXT not null default '{}'
 - `created_at` INTEGER not null
 - `updated_at` INTEGER not null
@@ -391,6 +394,11 @@ Constraints:
 Naming note:
 
 - `source_item_identifier` is intentionally named with `identifier` instead of `id` because it is owned by the external source, not by Walens internal database identity.
+
+Tag note:
+
+- tags should not be stored in `json_tags`
+- image/tag metadata should use dedicated relational tables for better dedupe and filtering
 
 ### 6. `images`
 
@@ -428,7 +436,43 @@ Constraints:
 
 - unique index on `(source_id, unique_id)` is recommended for phase 1.
 
-### 7. `image_locations`
+### 7. `tags`
+
+This table stores unique tags in normalized relational form.
+
+Suggested columns:
+
+- `id` TEXT primary key
+- `name` TEXT not null
+- `normalized_name` TEXT not null
+- `created_at` INTEGER not null
+- `updated_at` INTEGER not null
+
+Constraints:
+
+- unique index on `normalized_name`
+
+Semantics:
+
+- `normalized_name` should be a case-insensitive canonical form, for example lowercase trimmed text
+- tag uniqueness should be enforced case-insensitively through `normalized_name`
+
+### 8. `image_tags`
+
+Join table between images and tags.
+
+Suggested columns:
+
+- `id` TEXT primary key
+- `image_id` TEXT not null references `images(id)` on delete cascade
+- `tag_id` TEXT not null references `tags(id)` on delete cascade
+- `created_at` INTEGER not null
+
+Constraints:
+
+- unique index on `(image_id, tag_id)`
+
+### 9. `image_locations`
 
 This table tracks every concrete file path on disk for an image.
 
@@ -459,7 +503,33 @@ Constraints:
 
 - unique index on `path`
 
-### 8. `jobs`
+### 10. `image_thumbnails`
+
+This table tracks generated thumbnail files derived from downloaded images.
+
+Suggested columns:
+
+- `id` TEXT primary key
+- `image_id` TEXT not null references `images(id)` on delete cascade
+- `path` TEXT not null
+- `width` INTEGER not null
+- `height` INTEGER not null
+- `file_size_bytes` INTEGER
+- `created_at` INTEGER not null
+- `updated_at` INTEGER not null
+
+Constraints:
+
+- unique index on `image_id`
+- unique index on `path`
+
+Semantics:
+
+- thumbnail generation is a post-download step
+- thumbnails are optimized for UI listing and preview, not for device assignment
+- deleting an image should also delete its thumbnail file if present
+
+### 11. `jobs`
 
 Jobs are first-class persisted records.
 
@@ -506,7 +576,7 @@ Notes:
 - `json_input` stores source params / execution request snapshot.
 - `json_result` stores extensible metadata such as source cursor, warnings, or counts by category.
 
-### 9. `job_attempts` (optional)
+### 12. `job_attempts` (optional)
 
 Do not create this in phase 1 unless retry complexity grows.
 
@@ -526,7 +596,7 @@ Each source implementation should define:
 - parameter validation
 - parameter schema as `*huma.Schema` for frontend form generation
 - default lookup count when a source row sets `lookup_count = 0`
-- sync/fetch logic that returns normalized wallpaper records
+- fetch logic that yields image metadata lazily through iterator
 - best-effort `unique_id` generation for downloadable image items
 
 Suggested conceptual interface:
@@ -538,10 +608,21 @@ type Source interface {
     ValidateParams(raw json.RawMessage) error
     ParamSchema() *huma.Schema
     DefaultLookupCount() int
-    Sync(ctx context.Context, req SyncRequest) (*SyncResult, error)
-    BuildUniqueID(item SourceImageItem) (string, error)
+    Fetch(ctx context.Context, req FetchRequest) iter.Seq2[ImageMetadata, error]
+    BuildUniqueID(item ImageMetadata) (string, error)
+}
+
+type FetchRequest struct {
+    Params      []byte
+    LookupCount int
 }
 ```
+
+Interface notes:
+
+- `Fetch` should stream `ImageMetadata` items lazily rather than returning one large in-memory slice
+- iterator-based fetching allows downstream download work to start before the full source scan completes
+- `Params` can be stored in the app as stringified JSON, but the source-facing request can use `[]byte` for direct JSON handling
 
 ### Registry pattern
 
@@ -563,7 +644,7 @@ Execution meaning:
 
 - scheduler fires for `anime-pics-main`
 - a job is created for that `sources.id`
-- the runner executes the `booru` implementation with params from `anime-pics-main`
+- the runner calls `Fetch(...)` on the `booru` implementation with params from `anime-pics-main`
 - devices subscribed to `anime-pics-main` are the candidate set for downstream image fetching and assignment decisions
 
 Download/storage meaning:
@@ -654,14 +735,21 @@ Rationale:
 - Pull job IDs from queue.
 - Lock/update job status to `running`.
 - Resolve source configuration from DB.
-- Invoke source implementation.
+- Invoke source implementation fetch iterator.
 - Persist results, counts, errors, and timings.
 - Store discovered wallpapers.
 - Resolve or create `images` rows using source-provided `unique_id`.
 - Reuse existing local image content without redownload when possible.
+- Generate thumbnail file after successful canonical image download or reuse when thumbnail is missing.
 - Materialize target file paths using hard links first, then copy fallback.
 - Persist all tracked file paths into `image_locations`.
+- Persist thumbnail metadata/path into `image_thumbnails`.
 - Mark terminal status.
+
+Fetch/worker note:
+
+- iterator output from `Fetch(...)` should be usable to feed downstream download work progressively
+- this keeps the source fetch stage compatible with future worker parallelism without changing the source contract
 
 ### Best-effort dedupe policy
 
@@ -677,7 +765,7 @@ Important limits:
 
 Recommended lookup flow:
 
-1. source returns image metadata
+1. source iterator yields image metadata
 2. source implementation generates `unique_id`
 3. runner checks whether an `images` row already exists
 4. if found, reuse local canonical file instead of redownloading when possible
@@ -702,6 +790,29 @@ Recommended storage layout:
 
 - keep canonical images and per-device materialized paths under the same data directory when possible
 - this maximizes chance that hard-linking works across supported deployments
+
+### Thumbnail generation
+
+Thumbnail generation should happen as a standard post-download step.
+
+Goals:
+
+- keep UI image listing lightweight
+- avoid loading original multi-megabyte files for grid/list views
+- ensure one thumbnail per stored image for the common case
+
+Recommended behavior:
+
+1. after canonical image file is available, check whether thumbnail already exists
+2. if missing, generate thumbnail from the canonical image
+3. store thumbnail metadata and path in `image_thumbnails`
+4. serve thumbnail in UI list/gallery responses when available
+
+Implementation constraints:
+
+- thumbnail generation library must remain pure Go
+- no CGO, native bindings, or FFI
+- deletion of the parent image should also clean up thumbnail artifacts
 
 ### Delete semantics
 
@@ -737,6 +848,7 @@ For device wallpaper selection:
 4. Wallpaper resolution should be at least device size unless an optional fallback mode is introduced later.
 5. Device explicit min/max image dimension and filesize bounds must be respected when set.
 6. Source and subscription must both be enabled.
+7. Tag filtering should be supported through relational tag tables, not JSON arrays.
 
 Suggested SQL-level checks:
 
@@ -1051,6 +1163,8 @@ All examples below assume base path `/`.
 - `POST /api/v1/images/SetImageFavorite`
 - `POST /api/v1/images/DeleteImage`
   - best-effort delete all tracked disk locations and then remove the image record
+- `POST /api/v1/images/GetImageThumbnail`
+  - returns or resolves thumbnail access information for UI usage
 
 #### Jobs
 
@@ -1397,6 +1511,7 @@ Primary screens:
 - Source detail page manages many cron schedules.
 - Job page shows status, run time, duration, counts, and error reason.
 - Wallpaper grid shows preview, source, resolution, aspect ratio, and adult badge.
+- image list/gallery views should prefer generated thumbnails over original files
 - Source param UI should be able to evolve from raw JSON editing into schema-driven forms using `*huma.Schema` / JSON Schema.
 - when auth is enabled, browser users without valid auth cookie should see a simple login page before entering the app
 
@@ -1503,7 +1618,7 @@ Examples:
 3. Add migration runner.
 4. Add runtime manager for HTTP server, scheduler, queue, and job runner in one process.
 5. Add first migration for SQLite optimizations and best practices.
-6. Add business schema migrations for configs, devices, sources, source schedules, subscriptions, wallpapers, images, image_locations, and jobs.
+6. Add business schema migrations for configs, devices, sources, source schedules, subscriptions, wallpapers, images, tags, image_tags, image_locations, image_thumbnails, and jobs.
 7. Add persisted config bootstrapping with default row injection.
 8. Add Jet generation script/tooling.
 
@@ -1529,7 +1644,7 @@ Examples:
 1. Build normalized wallpaper model.
 2. Implement one source first, ideally `BooruSource`.
 3. Persist wallpaper metadata from jobs.
-4. Implement image dedupe, local canonical storage, and image location tracking.
+4. Implement image dedupe, local canonical storage, image location tracking, and thumbnail generation.
 5. Implement per-device filtered wallpaper query endpoint.
 
 ### Phase 5 - Frontend SPA
@@ -1609,6 +1724,7 @@ Recommendation:
 
 - store canonical downloaded files locally
 - track all derived file paths in `image_locations`
+- generate and track lightweight thumbnails for UI use
 - use hard links first and copy as fallback
 - treat dedupe as optimization, not correctness guarantee
 
@@ -1643,7 +1759,7 @@ If implementation starts now, the best order is:
 5. implement sources + schedules schema/API
 6. implement scheduler reload and warning detection
 7. implement jobs persistence + in-memory queue + runner
-8. implement images + image_locations schema and dedupe storage flow
+8. implement images + image_locations + image_thumbnails schema and dedupe storage flow
 9. implement device and subscription schema/API
 10. implement wallpaper and image filtering query APIs
 11. scaffold SPA and connect typed client
@@ -1655,7 +1771,7 @@ After planning, the next concrete implementation package should ideally produce:
 
 - runnable one-process Go server skeleton
 - first migration for SQLite setup and best practices
-- migration set for configs, devices, sources, schedules, subscriptions, wallpapers, images, image_locations, and jobs
+- migration set for configs, devices, sources, schedules, subscriptions, wallpapers, images, tags, image_tags, image_locations, image_thumbnails, and jobs
 - Jet generation script/prototype
 - scheduler/queue/runner skeleton wired into app lifecycle
 - Huma OpenAPI output
