@@ -290,7 +290,7 @@ Go-Jet generation rules must remain consistent:
 - timestamp INTEGER milliseconds -> custom time wrapper
 - duration INTEGER milliseconds via `*_ms` duration fields -> custom duration wrapper
 - generated fields also include `json` tags
-- doc metadata from migration comments should become `doc:"..."`
+- doc metadata should become `doc:"..."` via generator-managed per-column metadata, not SQLite comment reflection
 
 Custom types exposed through API models must implement Huma `SchemaProvider`.
 
@@ -309,7 +309,7 @@ Migration order is strict:
 - migration 2+: business schema
 
 Every schema field should have descriptive documentation metadata.
-Do not rely on SQLite native comment reflection alone; preserve comment metadata in a way codegen can consume.
+Do not rely on SQLite native comment reflection alone; preserve comment metadata in generator-managed per-column metadata that codegen can consume.
 
 ## Frontend Rules
 
