@@ -329,6 +329,43 @@ Performance rules:
 - aggressively lazy-load dependency-heavy views
 - avoid eager rendering of off-screen/heavy image UI where possible
 
+## Phase 0 Validation Log
+
+### WALENS-1 / P0.1 - Huma runtime and configurable base path
+
+Validated on 2026-04-06 against Huma v2 documentation.
+
+Outcome:
+
+- Huma is viable on top of `net/http` via the `humago` adapter for Go 1.22+ `http.ServeMux`
+- Configurable base-path deployments are viable for both `/` and subpaths like `/walens`
+- Huma docs/OpenAPI endpoints can stay at `{base}/docs` and `{base}/openapi.{json,yaml}` while RPC methods live under `{base}/api/...`
+- Plain `net/http` handlers can coexist with Huma routes for login and other infra endpoints
+
+Recommended implementation shape:
+
+- use one root `http.ServeMux` for the process
+- create one app sub-mux and mount it at the configured base path; if base is `/`, use it directly
+- create the Huma API on that app sub-mux via `humago`
+- register RPC operations with explicit paths starting at `/api/v1/...` instead of mounting Huma itself under `/api`
+- keep login and similar infra pages as plain `net/http` handlers on the same mounted app mux
+- keep auth enforcement as outer HTTP middleware with allowlist support for `GET {base}/login`; prefer header first, then cookie fallback
+
+Why this shape was chosen:
+
+- it preserves the required route contract without needing separate routers for docs vs API
+- it keeps base-path handling centralized at the mux mount point
+- it stays aligned with the single-process `net/http` architecture in the main plan
+
+Watch-outs:
+
+- `humago` requires Go 1.22+ because it targets the newer `http.ServeMux`
+- if `config.Servers` is set for OpenAPI generation, ensure the configured URL/path includes the deployed base path so docs generate correct client URLs
+- avoid mounting Huma under `/api` if docs and OpenAPI must remain at `{base}/docs` and `{base}/openapi.*`
+- auth middleware must not block the login page itself
+
+No plan/task changes required from this validation result.
+
 ## Editing Discipline
 
 When implementing:
