@@ -18,6 +18,16 @@ If a requested change conflicts with the plan, either:
 - update the plan first, or
 - explicitly call out the conflict to the user.
 
+## Plane MCP Task Rules
+
+When working on a task that comes from Plane MCP:
+
+1. mark the task as `in-progress` before starting implementation work
+2. if there is ambiguity, missing scope, or meaningful implementation doubt, confirm with the user before implementing; otherwise implement directly without waiting
+3. after the work is complete, create a git commit and push it, then provide a Markdown summary of what was done
+4. add a comment to the Plane task containing the GitHub commit URL, and include a rich-text HTML version of the Markdown summary in that same comment
+5. mark the task as `done` after the commit is pushed and the Plane comment has been added
+
 ## Product Scope
 
 Walens is a small self-hosted wallpaper collection app.
@@ -414,6 +424,37 @@ Watch-outs:
 - in dev mode, asset URL handling may require Vite proxying or `server.origin` depending on how backend HTML references are emitted
 
 Plan updated to move the frontend architecture from SvelteKit SPA to plain Svelte + Vite with runtime-injected base path handling.
+
+### WALENS-3 / P0.3 - SQLite stack and migration approach
+
+Validated on 2026-04-06 against the no-CGO runtime constraints and planned Go-Jet customization workflow.
+
+Outcome:
+
+- `modernc.org/sqlite` remains aligned with Walens pure-Go deployment goals
+- `golang-migrate` remains aligned with embedded startup migrations
+- migration 1 should remain SQLite setup and optimization only
+- SQLite comment support is not sufficient as a source for Jet `doc` tags
+- `doc` tags should be emitted by a generator hook at table/column granularity instead
+
+Recommended implementation shape:
+
+- keep SQL migrations authoritative for schema only
+- keep field documentation metadata in the codegen layer and update it alongside schema changes
+- use a helper shaped like `func createDocTag(table metadata.Table, column metadata.Column) (tag string)` returning `doc:"..."`
+- fail generation when required documentation metadata is missing for business schema columns
+
+Why this shape was chosen:
+
+- it avoids relying on unsupported SQLite comment reflection
+- it fits the existing need for Go-Jet customization
+- it keeps generated docs explicit and deterministic
+
+Watch-outs:
+
+- migration changes and doc metadata changes can drift if not updated together
+- column renames need matching generator metadata updates
+- generator validation should fail loudly on missing documentation
 
 ## Editing Discipline
 
