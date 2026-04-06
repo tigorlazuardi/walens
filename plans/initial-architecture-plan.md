@@ -160,7 +160,10 @@ Core purpose only:
 
 ### Frontend
 
-- SvelteKit configured as SPA / full client-side app.
+- Plain Svelte 5 app built with Vite, not SvelteKit.
+- Backend-owned HTML shell with runtime-injected frontend config.
+- Lightweight client-side routing with runtime base-path support.
+- Route-level lazy loading via dynamic imports / `import.meta.glob`.
 - TanStack Svelte Query.
 - `shadcn-svelte`.
 - `openapi-fetch` for typed API integration.
@@ -265,11 +268,10 @@ walens/
       middleware/
     frontend/
   frontend/
+    index.html
     src/
-    static/
     package.json
     vite.config.ts
-    svelte.config.js
   plans/
 ```
 
@@ -1104,6 +1106,9 @@ Rules:
 - frontend asset serving, SPA fallback, login page, and API routes must all honor the configured base path
 - if base path is `/walens`, API routes become `/walens/api/...`
 - Vite dev mounting and production asset serving must both work correctly when base path is not `/`
+- frontend deployment artifacts should remain usable at `/` and at subpaths like `/walens` without rebuilding the frontend per base path
+- backend-rendered HTML shell must inject runtime config so frontend router and API client derive paths from runtime, not compile-time constants
+- production entry assets must be served under `{base}/assets/...` and split chunks must resolve relative to that entry asset location
 
 Recommended config:
 
@@ -1615,7 +1620,7 @@ Primary screens:
 
 Using `github.com/olivere/vite`:
 
-- in development, Go server mounts or proxies Vite dev server assets
+- in development, Go server owns the HTML shell and points frontend module loading at the Vite dev server
 - in production, Go server serves built frontend assets from embedded files or packaged static directory
 - API and frontend remain same-origin
 - configured base path must be honored by both dev and prod asset serving
@@ -1630,7 +1635,39 @@ Recommended route split:
 
 Important note:
 
-- frontend asset URLs, router base, and backend-mounted Vite asset paths must all be derived from the same configured base path to avoid broken assets when deploying under a subpath
+- backend should render the SPA shell and inject `window.__WALENS__` with at least `basePath` and `apiBase`
+- frontend asset URLs, router base, and backend-mounted Vite asset paths must all be derived from the same runtime-configured base path to avoid broken assets when deploying under a subpath
+- Vite production builds should use `base: './'`, `manifest: true`, and preferably `publicDir: false` so emitted asset URLs remain relocatable and explicit
+- route components should be code-split and lazy-loaded via dynamic imports / `import.meta.glob`
+- optional route preloading after initial render is allowed via `requestIdleCallback`, hover intent, or other client-side heuristics
+
+## Frontend Serving Strategy
+
+Walens frontend should be served as a backend-controlled SPA shell plus a client-rendered Svelte app.
+
+Rules:
+
+- Go owns the top-level HTML shell response for SPA routes
+- the shell injects runtime config through `window.__WALENS__`
+- `window.__WALENS__` should include at least `basePath` and `apiBase`
+- frontend code must not hardcode root-absolute API or asset URLs such as `/api/...` or `/assets/...`
+- links and navigation must honor the runtime base path
+- the chosen client router may be a small custom router or a third-party router, but it must support runtime-derived base path handling
+- route modules should be lazy-loaded so unvisited pages are not eagerly imported on startup
+
+Why this shape:
+
+- it allows one built artifact to work at `/` and at subpaths like `/walens`
+- it keeps route ownership for login, docs, OpenAPI, auth, and API endpoints in Go
+- it avoids compile-time-only base-path assumptions in the frontend app framework
+
+Implementation notes:
+
+- use plain Svelte components plus Vite code splitting
+- derive navigation base path from `window.__WALENS__.basePath`
+- derive API client base path from `window.__WALENS__.apiBase`
+- prefer imported/module-managed assets over root-absolute public-folder references
+- ensure split chunks and any preload/prefetch logic still resolve correctly when the app is mounted under a subpath
 
 ## Build and Deployment Plan
 
@@ -1694,12 +1731,12 @@ Examples:
 ### Phase 0 - Validation spikes
 
 1. Verify Huma + standard `net/http` bootstrapping.
-2. Verify `olivere/vite` integration with SvelteKit SPA.
+2. Verify `olivere/vite` integration with a plain Svelte + Vite SPA shell using runtime-injected base path config.
 3. Verify `modernc.org/sqlite` + `golang-migrate` compatibility.
 4. Verify Go-Jet generation workflow against SQLite schema and confirm customization path.
 5. Verify cross-compilation and release packaging for 6 targets.
 6. Verify cron parser/library is pure Go and suitable for reloadable schedules.
-7. Verify base-path mounting works for API routes, login page, SPA fallback, and Vite-served assets.
+7. Verify base-path mounting works for API routes, login page, SPA fallback, Vite-served assets, and code-split frontend chunks without rebuilding per deployment path.
 
 ### Phase 1 - Runtime skeleton
 
@@ -1739,7 +1776,7 @@ Examples:
 
 ### Phase 5 - Frontend SPA
 
-1. Scaffold SvelteKit SPA.
+1. Scaffold plain Svelte + Vite SPA and backend-owned shell integration.
 2. Integrate generated API client.
 3. Build simple login UI and cookie-based browser auth flow.
 4. Build devices UI.
@@ -1747,7 +1784,7 @@ Examples:
 6. Build subscriptions UI.
 7. Build jobs UI.
 8. Build mobile-first image gallery UI with responsive masonry layout.
-9. Add lazy-loading for heavy frontend components and image-heavy views.
+9. Add lazy-loading for route modules, heavy frontend components, and image-heavy views.
 10. Build image management UI with search, filter, favorite, and delete flow.
 
 ### Phase 6 - Packaging
@@ -1807,7 +1844,18 @@ Recommendation:
 - evaluate additions carefully and keep the default toolchain minimal
 - prefer portable JS tooling without native compile steps
 
-### 5. Asset storage strategy
+### 5. Universal frontend artifact portability
+
+Walens should support deployment under `/` and under subpaths like `/walens` using the same built frontend artifact.
+
+Recommendation:
+
+- keep the HTML shell backend-owned
+- inject runtime path config through `window.__WALENS__`
+- avoid frontend framework features that require the deployment base path to be fixed at build time
+- verify production builds at both `/` and `/walens` before treating the frontend serving strategy as settled
+
+### 6. Asset storage strategy
 
 Walens now needs local downloaded file tracking with best-effort dedupe.
 
@@ -1821,7 +1869,7 @@ Recommendation:
 - use hard links first and copy as fallback
 - treat dedupe as optimization, not correctness guarantee
 
-### 6. Cross-platform hard-link behavior
+### 7. Cross-platform hard-link behavior
 
 Hard-link support exists on target OSes but can vary by filesystem and mount layout.
 
@@ -1830,7 +1878,7 @@ Recommendation:
 - explicitly test hard-link create/delete behavior on Windows, Linux, macOS, and Docker bind mounts
 - keep copy fallback as a first-class supported path
 
-### 7. Basic Auth simplicity vs security
+### 8. Basic Auth simplicity vs security
 
 This auth layer is intentionally simple and should be treated as deployment protection, not a full identity system.
 
@@ -1868,5 +1916,5 @@ After planning, the next concrete implementation package should ideally produce:
 - Jet generation script/prototype
 - scheduler/queue/runner skeleton wired into app lifecycle
 - Huma OpenAPI output
-- SvelteKit SPA scaffold integrated with Vite mounting
+- plain Svelte + Vite SPA scaffold integrated with backend-owned shell and Vite mounting
 - first config, device, source, schedule, subscription, and image listing/favorite endpoints

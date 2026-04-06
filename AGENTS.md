@@ -315,6 +315,14 @@ Do not rely on SQLite native comment reflection alone; preserve comment metadata
 
 Frontend is mobile first.
 
+Architecture rules:
+
+- use plain Svelte + Vite, not SvelteKit, unless the main plan is updated again
+- backend owns the SPA HTML shell and injects runtime config through `window.__WALENS__`
+- frontend routing must honor runtime `basePath` and must not assume deployment at `/`
+- route modules should be lazy-loaded; prefer dynamic imports / `import.meta.glob`
+- frontend API calls must derive from runtime `apiBase`, not hardcoded root-absolute URLs
+
 Required UX rules:
 
 - smooth on mobile first
@@ -368,39 +376,44 @@ No plan/task changes required from this validation result.
 
 ### WALENS-2 / P0.2 - Vite mounting under subpath deployment
 
-Validated on 2026-04-06 against Vite backend integration docs, Vite shared config docs, SvelteKit SPA docs, and `olivere/vite` documentation.
+Validated on 2026-04-06 against Vite backend integration docs, Vite shared config docs, Svelte SPA deployment constraints, and `olivere/vite` documentation.
 
 Outcome:
 
 - `olivere/vite` is viable for Walens in both dev and production, but it only solves Vite asset integration; backend route ownership still needs to stay in Go
-- Vite supports a configurable public `base` path in both development and production, so `/` and `/walens/` deployments are both viable
-- SvelteKit supports non-root hosting via `kit.paths.base`, which should match the backend mount path
+- build-time subpath configuration alone is not sufficient for a universal frontend artifact that must work at both `/` and `/walens`
+- plain Svelte + Vite is preferred over SvelteKit because Walens needs runtime-derived base-path handling
 - SPA fallback can coexist with login, docs, OpenAPI, and API routes as long as the frontend catch-all handler is registered last
+- route-level code splitting remains viable as long as the frontend build emits relocatable asset URLs
 
 Recommended implementation shape:
 
 - keep the frontend mounted under the same backend base path chosen in runtime config
-- make frontend base-path configuration explicit and shared across dev/build, mapping `/` -> Vite base `/` and SvelteKit base `""`, and `/walens` -> Vite base `/walens/` and SvelteKit base `/walens`
+- use plain Svelte + Vite with a backend-owned shell that injects `window.__WALENS__` with at least `basePath` and `apiBase`
 - use `olivere/vite` only for SPA shell + asset integration; keep login, docs, OpenAPI, and RPC/API handlers as normal backend routes
+- use Vite production builds with `base: './'`, `manifest: true`, and preferably `publicDir: false` so emitted assets and split chunks stay relocatable under subpaths
+- use a lightweight client router or custom router that derives its basename from runtime config
+- lazy-load route modules via dynamic imports / `import.meta.glob`
 - register SPA fallback last on the mounted app mux so `/login`, `/docs`, `/openapi.*`, and `/api/...` win before the client app catch-all
 - in dev mode, keep the Vite dev server running separately and point `olivere/vite` at it via `ViteURL`
 - in production, serve built assets from the generated frontend output and use the SPA fallback page for non-asset frontend routes
+- optional background route preloading after first render is allowed
 
 Why this shape was chosen:
 
 - it preserves backend-controlled infra routes while still allowing SPA navigation under the same base path
-- it keeps root and subpath deployments symmetrical instead of adding special-case routing for `/walens`
-- it matches Vite's documented backend integration model and SvelteKit's documented base-path support
+- it allows one built frontend artifact to work at root and subpath deployments
+- it matches Vite's documented backend integration model while avoiding compile-time-only frontend base-path assumptions
 
 Watch-outs:
 
-- Vite `base` must end with a trailing slash for subpath deployment, for example `/walens/`
-- SvelteKit `kit.paths.base` must not end with a trailing slash, for example `/walens`
-- SvelteKit SPA fallback pages use absolute asset paths, so the configured base path must be correct at build time
-- if Vite's `public` directory is used, its assets must be served consistently in both dev and prod; disabling `publicDir` is often simpler for backend-driven apps
+- frontend code must not hardcode root-absolute API or asset URLs
+- split chunks and preloaded assets must be tested at both `/` and `/walens`
+- if Vite `public` directory is used, its assets must be served consistently in both dev and prod; disabling `publicDir` is often simpler for backend-driven apps
+- dynamic imports must resolve relative to the served entry asset location, not a root-only assumption
 - in dev mode, asset URL handling may require Vite proxying or `server.origin` depending on how backend HTML references are emitted
 
-No plan/task changes required from this validation result.
+Plan updated to move the frontend architecture from SvelteKit SPA to plain Svelte + Vite with runtime-injected base path handling.
 
 ## Editing Discipline
 
