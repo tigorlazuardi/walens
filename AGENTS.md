@@ -456,6 +456,33 @@ Watch-outs:
 - column renames need matching generator metadata updates
 - generator validation should fail loudly on missing documentation
 
+### WALENS-4 / P0.4 - Go-Jet customization pipeline
+
+Validated on 2026-04-06 against the required mappings for UUID IDs, Unix-millisecond timestamps, duration wrappers, doc tags, identifier naming, and Huma schema integration.
+
+Outcome:
+
+- the Go-Jet customization path is viable through a Walens-owned generation wrapper
+- generated files should not be hand-edited; deterministic rewrite/generation steps should own all customizations
+- `id` and `*_id` UUID mapping remains viable, but only if external IDs consistently use `*_identifier`
+- timestamp wrapper mapping is viable, but should use explicit field matching instead of broad integer heuristics
+- duration wrapper mapping is viable for true `*_ms` duration columns
+- Huma `SchemaProvider` support should live on shared wrapper types used in API-facing models
+
+Recommended implementation shape:
+
+- run migrations into a local codegen SQLite database
+- run Jet generation against that schema
+- run a Walens post-generation step to rewrite generated field types and tags deterministically
+- centralize helpers such as `isUUIDColumn`, `isUnixMilliTimestampColumn`, `isDurationColumn`, and `applyDocTag`
+- require wrapper types used by generated DB models to implement `sql.Scanner` and `driver.Valuer`
+
+Watch-outs:
+
+- broad suffix-based rules can rewrite the wrong columns
+- naming drift from `*_identifier` back to `*_id` will break the intended internal/external ID split
+- broken wrapper DB conversion logic will surface as runtime query/scan failures
+
 ## Editing Discipline
 
 When implementing:
