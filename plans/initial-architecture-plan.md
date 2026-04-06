@@ -885,11 +885,29 @@ Recommended behavior:
 3. store thumbnail metadata and path in `image_thumbnails`
 4. serve thumbnail in UI list/gallery responses when available
 
+Thumbnail output rules:
+
+- thumbnails are always stored as JPEG for lightweight preview delivery
+- preserve aspect ratio
+- fit within a maximum bounding box of `512x512`
+- target thumbnail size is around `40KB`
+- if the thumbnail remains larger than target after best-effort compression, accept it
+- thumbnail quality tuning is best-effort and should not block image ingestion
+
 Implementation constraints:
 
 - thumbnail generation library must remain pure Go
 - no CGO, native bindings, or FFI
 - deletion of the parent image should also clean up thumbnail artifacts
+- thumbnail generation should prefer pure-Go scaling and JPEG encoding rather than external native image pipelines
+
+Canonical/device image materialization rules:
+
+- stored image outputs should be normalized to JPEG or PNG only for maximum wallpaper compatibility
+- if the decoded image contains transparency, materialize as PNG
+- if the decoded image does not contain transparency, materialize as JPEG
+- WebP and other supported source formats may be accepted as input but should be converted during materialization
+- animated images should be rejected rather than partially materialized
 
 ### Delete semantics
 
@@ -1965,6 +1983,43 @@ Recommendation:
 ### 7. Cross-platform hard-link behavior
 
 Hard-link support exists on target OSes but can vary by filesystem and mount layout.
+
+### WALENS-5 / P0.5 - Pure-Go thumbnail and filesystem behavior
+
+Validated on 2026-04-06 against the Walens portability goal for Linux, Windows, macOS, mobile-target wallpaper compatibility, and the no-CGO dependency rules.
+
+Outcome:
+
+- filesystem materialization should stay on the Go standard library for temp file handling, rename, hard-link creation, copy fallback, and deletion
+- thumbnail generation should use a pure-Go resize path and standard JPEG encoding
+- canonical and device-facing stored image files should be normalized to JPEG or PNG only
+- decoded images with transparency should materialize as PNG
+- decoded images without transparency should materialize as JPEG
+- WebP input support is acceptable for ingestion, but WebP should be converted before storage/materialization
+- animated images should be rejected for now instead of partially decoding or extracting a single frame
+- thumbnail output should always be JPEG, fit within `512x512`, preserve aspect ratio, and target roughly `40KB` on a best-effort basis
+
+Recommended implementation shape:
+
+- use the Go standard library for file lifecycle operations such as temp download, rename, hard link, copy fallback, and cleanup
+- use a pure-Go image scaling package from `golang.org/x/image` for thumbnail resizing
+- use standard library JPEG/PNG encoders for normalized image output
+- start thumbnail encoding from a moderate JPEG quality and reduce only as needed in a small best-effort ladder toward the `40KB` target
+- treat the thumbnail size target as advisory, not as a failure condition
+
+Why this shape was chosen:
+
+- it maximizes compatibility for wallpaper files across desktop and mobile devices
+- it avoids native image dependencies while keeping the image pipeline predictable
+- it prevents WebP from leaking into device-facing storage where wallpaper support can vary
+- it keeps preview generation lightweight and operationally simple
+
+Watch-outs:
+
+- rejecting animated images must happen reliably during decode/inspection so they do not enter partial storage flows
+- transparency detection must be accurate because it decides whether output becomes PNG or JPEG
+- some detailed thumbnails will exceed `40KB` even after best-effort compression and should still be accepted
+- repeated lossy re-encoding should be avoided by generating thumbnails from the canonical stored image, not from previous thumbnails
 
 Recommendation:
 

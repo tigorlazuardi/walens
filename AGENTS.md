@@ -188,6 +188,15 @@ Prefer:
 Thumbnails are mandatory post-download artifacts for UI performance.
 They must use a pure-Go implementation.
 
+Image materialization rules:
+
+- canonical and device-facing stored images should be normalized to JPEG or PNG only
+- if an image has transparency, materialize it as PNG
+- if an image does not have transparency, materialize it as JPEG
+- WebP and other supported input formats may be decoded for ingestion, but should not remain as device-facing stored output
+- animated images should be rejected
+- thumbnails are always JPEG, preserve aspect ratio, fit within `512x512`, and target about `40KB` on a best-effort basis
+
 ## Config Rules
 
 Application config:
@@ -482,6 +491,33 @@ Watch-outs:
 - broad suffix-based rules can rewrite the wrong columns
 - naming drift from `*_identifier` back to `*_id` will break the intended internal/external ID split
 - broken wrapper DB conversion logic will surface as runtime query/scan failures
+
+### WALENS-5 / P0.5 - Pure-Go thumbnail and filesystem behavior
+
+Validated on 2026-04-06 against the wallpaper compatibility goals for Linux, Windows, macOS, and mobile-target devices.
+
+Outcome:
+
+- filesystem materialization should stay on the Go standard library
+- canonical and device-facing outputs should be normalized to JPEG or PNG only
+- images with transparency should materialize as PNG
+- images without transparency should materialize as JPEG
+- WebP may be accepted as input but should be converted before storage
+- animated images should be rejected
+- thumbnails should always be JPEG, fit within `512x512`, preserve aspect ratio, and target about `40KB` best-effort
+
+Recommended implementation shape:
+
+- use standard library file operations for temp download, rename, hard-link creation, copy fallback, and cleanup
+- use a pure-Go scaler from `golang.org/x/image` for thumbnail generation
+- use standard library JPEG and PNG encoders for final stored output
+- treat the thumbnail size target as advisory rather than a hard failure condition
+
+Watch-outs:
+
+- transparency detection must be correct because it decides output format
+- animated image rejection should happen before partial materialization
+- some thumbnails will remain above target size and should still be accepted after best effort
 
 ## Editing Discipline
 
