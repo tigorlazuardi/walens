@@ -654,6 +654,10 @@ Interface notes:
 - `Fetch` should stream `ImageMetadata` items lazily rather than returning one large in-memory slice
 - iterator-based fetching allows downstream download work to start before the full source scan completes
 - `Params` can be stored in the app as stringified JSON, but the source-facing request can use `[]byte` for direct JSON handling
+- callers should be able to stop iteration early without forcing the source to buffer and drain the remaining upstream result set
+- `Fetch` should respect `context.Context` cancellation promptly
+- iteration errors should surface through the iterator as soon as they happen instead of waiting for the full scan to finish
+- source implementations should avoid full-result buffering unless an upstream API makes that unavoidable
 
 ### Registry pattern
 
@@ -819,6 +823,7 @@ Fetch/worker note:
 
 - iterator output from `Fetch(...)` should be usable to feed downstream download work progressively
 - this keeps the source fetch stage compatible with future worker parallelism without changing the source contract
+- the iterator contract should remain correct even if downstream processing stops early because of cancellation, fatal error, or lookup-budget completion
 
 ### Best-effort dedupe policy
 
@@ -2020,6 +2025,39 @@ Watch-outs:
 - transparency detection must be accurate because it decides whether output becomes PNG or JPEG
 - some detailed thumbnails will exceed `40KB` even after best-effort compression and should still be accepted
 - repeated lossy re-encoding should be avoided by generating thumbnails from the canonical stored image, not from previous thumbnails
+
+### WALENS-6 / P0.6 - Source iterator fetch contract
+
+Validated on 2026-04-06 against the requirement that source metadata should stream progressively into downstream processing without buffering the full source result set first.
+
+Outcome:
+
+- the iterator-based `Fetch(ctx, req) iter.Seq2[ImageMetadata, error]` contract is viable for Walens source implementations
+- the fetch contract should be lazy by default so downstream filtering and materialization can begin before the source finishes scanning all upstream results
+- the iterator contract should allow early stop without requiring the caller to drain the rest of the source result set
+- `context.Context` cancellation should be treated as a first-class control path for iterator shutdown
+- iteration errors should be surfaced as soon as they occur rather than deferred until the end of a full fetch pass
+
+Recommended implementation shape:
+
+- keep `Fetch` iterator-based in the source interface
+- have source implementations yield one metadata item at a time as upstream results are decoded or discovered
+- pass `context.Context` all the way into upstream HTTP requests and decoding loops
+- treat early downstream stop as normal control flow, not as misuse of the source contract
+- avoid accumulating a full in-memory slice of source metadata before yielding unless an upstream API absolutely forces it
+
+Why this shape was chosen:
+
+- it keeps the source layer compatible with progressive job processing
+- it avoids unnecessary memory growth on large source scans
+- it preserves flexibility for future worker parallelism without changing the source API again
+- it matches the Walens requirement that lookup_count is an upstream inspection budget, not a buffered result count
+
+Watch-outs:
+
+- some upstream APIs may still force page-level buffering, but Walens should still yield progressively at the earliest possible point
+- cancellation must be checked inside pagination, decode, and yield loops or the iterator will feel blocking in practice
+- iterator error delivery should stay deterministic so partial progress and terminal failures are understandable in job logs
 
 Recommendation:
 

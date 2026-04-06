@@ -136,6 +136,13 @@ type Source interface {
 
 `Fetch` is iterator-based and should support progressive downstream work.
 
+Iterator contract rules:
+
+- yield metadata lazily instead of buffering the full result set first
+- honor `context.Context` cancellation promptly
+- allow callers to stop iteration early without requiring full upstream drain
+- surface iteration errors as they happen
+
 ## Background Runner Rules
 
 Required source-run flow:
@@ -518,6 +525,31 @@ Watch-outs:
 - transparency detection must be correct because it decides output format
 - animated image rejection should happen before partial materialization
 - some thumbnails will remain above target size and should still be accepted after best effort
+
+### WALENS-6 / P0.6 - Source iterator fetch contract
+
+Validated on 2026-04-06 against the requirement that fetched source metadata should stream progressively into downstream processing.
+
+Outcome:
+
+- the iterator-based `Fetch(ctx, req) iter.Seq2[ImageMetadata, error]` contract is viable
+- source fetching should stay lazy so downstream work can begin before the full source scan completes
+- callers should be able to stop iteration early without draining the full upstream result set
+- `context.Context` cancellation should be honored promptly
+- iteration errors should surface as they happen rather than at the end of the scan
+
+Recommended implementation shape:
+
+- keep `Fetch` iterator-based in the source interface
+- yield metadata items as upstream responses are decoded or discovered
+- thread `context.Context` through upstream HTTP and decode loops
+- avoid full-result buffering unless the upstream API forces it
+
+Watch-outs:
+
+- some upstream APIs may still require page-level buffering
+- cancellation checks must exist inside pagination and decode loops
+- iterator error delivery should stay deterministic so partial progress is understandable
 
 ## Editing Discipline
 
