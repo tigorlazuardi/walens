@@ -13,6 +13,9 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/danielgtaylor/huma/v2"
+	"github.com/danielgtaylor/huma/v2/adapters/humago"
+	"github.com/walens/walens/internal/auth"
 	"github.com/walens/walens/internal/config"
 	"github.com/walens/walens/internal/db"
 	"github.com/walens/walens/internal/logger"
@@ -30,6 +33,7 @@ type App struct {
 	scheduler *scheduler.Scheduler
 	queue     *queue.Queue
 	runner    *runner.Runner
+	handler   http.Handler
 }
 
 // New creates a new application instance.
@@ -50,11 +54,24 @@ func New(cfg *config.Config) *App {
 	}
 }
 
+// Handler returns the HTTP handler for the application, useful for testing.
+func (a *App) Handler() http.Handler {
+	if a.handler == nil {
+		a.handler = a.buildHTTPHandler()
+	}
+	return a.handler
+}
+
 // Start initializes and starts all application components.
 // Startup order: DB -> scheduler -> runner -> HTTP server.
 func (a *App) Start() error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+
+	// Validate auth config
+	if err := a.config.Auth.Validate(); err != nil {
+		return fmt.Errorf("auth configuration error: %w", err)
+	}
 
 	// 1. Initialize database
 	if err := a.initDB(); err != nil {
@@ -113,20 +130,44 @@ func joinPath(base, suffix string) string {
 	return path.Join(base, suffix)
 }
 
-// startHTTPServer configures and starts the HTTP server with health endpoint.
-func (a *App) startHTTPServer() error {
+func (a *App) buildHTTPHandler() http.Handler {
 	mux := http.NewServeMux()
 	basePath := a.config.Server.BasePath
+	humaConfig := huma.DefaultConfig("Walens API", "0.0.1")
+	humaConfig.OpenAPIPath = joinPath(basePath, "/openapi")
+	humaConfig.DocsPath = joinPath(basePath, "/docs")
+	humaConfig.SchemasPath = joinPath(basePath, "/schemas")
+	_ = humago.New(mux, humaConfig)
 
-	// Register health endpoint under the configured base path.
-	healthPath := joinPath(basePath, "health")
-	mux.HandleFunc(healthPath, a.handleHealth)
+	// Build auth config for middleware
+	authConfig := auth.Config{
+		Enabled:  a.config.Auth.Enabled,
+		Username: a.config.Auth.Username,
+		Password: a.config.Auth.Password,
+		BasePath: a.config.Server.BasePath,
+	}
 
-	a.logger.Info("HTTP server configured", "base_path", basePath, "health_path", healthPath)
+	// Register routes with base path
+	a.registerRoutes(mux, basePath, authConfig)
+
+	var handler http.Handler = mux
+	if authConfig.Enabled {
+		handler = authConfig.Middleware()(mux)
+	}
+
+	return handler
+}
+
+// startHTTPServer configures and starts the HTTP server with health endpoint.
+func (a *App) startHTTPServer() error {
+	basePath := a.config.Server.BasePath
+	a.handler = a.buildHTTPHandler()
+
+	a.logger.Info("HTTP server configured", "base_path", basePath)
 
 	a.server = &http.Server{
 		Addr:         fmt.Sprintf("%s:%d", a.config.Server.Host, a.config.Server.Port),
-		Handler:      mux,
+		Handler:      a.handler,
 		ReadTimeout:  30 * time.Second,
 		WriteTimeout: 30 * time.Second,
 		IdleTimeout:  60 * time.Second,
@@ -140,6 +181,20 @@ func (a *App) startHTTPServer() error {
 	}()
 
 	return nil
+}
+
+// registerRoutes registers all HTTP routes on the given mux.
+func (a *App) registerRoutes(mux *http.ServeMux, basePath string, authConfig auth.Config) {
+	// Health endpoint
+	healthPath := joinPath(basePath, "health")
+	mux.HandleFunc(healthPath, a.handleHealth)
+
+	// Auth endpoints for browser cookie bootstrap.
+	authLoginPath := joinPath(basePath, "/api/login")
+	mux.HandleFunc(authLoginPath, a.makeAuthLoginHandler(authConfig))
+
+	authLogoutPath := joinPath(basePath, "/api/logout")
+	mux.HandleFunc(authLogoutPath, a.handleLogout)
 }
 
 // handleHealth returns the health status of the application.
@@ -174,6 +229,44 @@ func (a *App) handleHealth(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(httpStatus)
 	fmt.Fprintf(w, `{"status":"%s","queue_size":%d}`, status, a.queue.Size())
+}
+
+// makeAuthLoginHandler creates a handler for the cookie bootstrap login endpoint.
+func (a *App) makeAuthLoginHandler(authConfig auth.Config) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		if err := r.ParseForm(); err != nil {
+			http.Error(w, "Bad Request", http.StatusBadRequest)
+			return
+		}
+
+		username := r.FormValue("username")
+		password := r.FormValue("password")
+
+		if err := authConfig.ValidateCredentials(username, password); err == nil {
+			cookieValue := auth.BuildCookieValue(username, password)
+			auth.SetAuthCookie(w, r, a.config.Server.BasePath, cookieValue)
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+	}
+}
+
+// handleLogout clears the auth cookie.
+func (a *App) handleLogout(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	auth.ClearAuthCookieHandler(w, r, a.config.Server.BasePath)
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // waitForShutdown listens for shutdown signals and orchestrates graceful shutdown.

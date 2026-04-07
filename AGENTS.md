@@ -30,6 +30,13 @@ When working on a task that comes from Plane MCP:
 6. Sometimes a task has subtasks that has more detailed instructions. Make sure to do the subtasks first and also apply the task implementation rules to the subtasks.
 7. Do not add or update `AGENTS.md` during normal implementation tasks unless the work is a validation task or the user explicitly requests an `AGENTS.md` change.
 
+### Walens Plane project mapping
+
+- For `WALENS-*` task references, use the Plane MCP project `Walens` from `plane-tigor`.
+- Plane project identifier: `WALENS`
+- Plane project ID: `dc766694-bfd6-47a7-8a63-4afcbb048f4d`
+- Unless the user says otherwise, requests like `implement WALENS-8` refer to this Plane project and its work items.
+
 ## Product Scope
 
 Walens is a small self-hosted wallpaper collection app.

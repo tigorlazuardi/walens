@@ -1,9 +1,13 @@
 package config
 
 import (
+	"errors"
 	"os"
 	"strconv"
 )
+
+// ErrAuthEnabledButNotConfigured is returned when auth is enabled but username or password is empty.
+var ErrAuthEnabledButNotConfigured = errors.New("auth is enabled but username or password is not configured")
 
 type Config struct {
 	Server   ServerConfig
@@ -27,6 +31,16 @@ type AuthConfig struct {
 	Enabled  bool
 	Username string
 	Password string
+}
+
+// Validate checks that if auth is enabled, username and password are non-empty.
+func (c AuthConfig) Validate() error {
+	if c.Enabled {
+		if c.Username == "" || c.Password == "" {
+			return ErrAuthEnabledButNotConfigured
+		}
+	}
+	return nil
 }
 
 func Load() *Config {
