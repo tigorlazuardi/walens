@@ -117,6 +117,12 @@ func (a *App) initDB() error {
 	}
 	a.logger.Info("database connected", "path", a.config.Database.Path)
 
+	// Run migrations after opening DB and before scheduler starts
+	if err := db.RunMigrations(a.db); err != nil {
+		return fmt.Errorf("failed to run migrations: %w", err)
+	}
+	a.logger.Info("database migrations applied")
+
 	// Give scheduler access to DB for reload queries
 	a.scheduler.SetDB(a.db)
 
