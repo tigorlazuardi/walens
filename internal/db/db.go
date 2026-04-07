@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"database/sql"
+	"net/url"
 	"os"
 	"path/filepath"
 	"time"
@@ -16,7 +17,8 @@ func Open(dbPath string) (*sql.DB, error) {
 		return nil, err
 	}
 
-	db, err := sql.Open("sqlite", dbPath)
+	dsn := sqliteDSN(dbPath)
+	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, err
 	}
@@ -25,17 +27,13 @@ func Open(dbPath string) (*sql.DB, error) {
 		return nil, err
 	}
 
-	db.SetMaxOpenConns(1)
-	db.SetMaxIdleConns(1)
+	db.SetMaxOpenConns(4)
+	db.SetMaxIdleConns(4)
 
-	// Apply SQLite pragmas for best practices
+	// Apply SQLite pragmas that should persist at the database level.
 	pragmas := []string{
-		"PRAGMA foreign_keys = ON",
-		"PRAGMA busy_timeout = 5000",
 		"PRAGMA journal_mode = WAL",
 		"PRAGMA synchronous = NORMAL",
-		"PRAGMA cache_size = -2000", // -2000 means 2MB
-		"PRAGMA temp_store = MEMORY",
 	}
 	for _, p := range pragmas {
 		if _, err := db.Exec(p); err != nil {
@@ -45,6 +43,24 @@ func Open(dbPath string) (*sql.DB, error) {
 	}
 
 	return db, nil
+}
+
+func sqliteDSN(dbPath string) string {
+	values := url.Values{}
+	values.Add("_pragma", "foreign_keys(1)")
+	values.Add("_pragma", "busy_timeout(5000)")
+	values.Add("_pragma", "temp_store(MEMORY)")
+	values.Add("_pragma", "cache_size(-2000)")
+	if dbPath == ":memory:" {
+		values.Add("mode", "memory")
+		return "file::memory:?" + values.Encode()
+	}
+
+	return (&url.URL{
+		Scheme:   "file",
+		Path:     filepath.ToSlash(dbPath),
+		RawQuery: values.Encode(),
+	}).String()
 }
 
 // Ping checks database connectivity.

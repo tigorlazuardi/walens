@@ -343,6 +343,13 @@ Migration order is strict:
 - migration 1: SQLite optimizations and best practices only
 - migration 2+: business schema
 
+Migration implementation rules:
+
+- use `pressly/goose` for SQL migrations
+- store migrations in `internal/db/migrations`
+- use Goose single-file SQL migrations with `-- +goose up` / `-- +goose down`, not separate `.up.sql` / `.down.sql` files
+- embed migrations into the binary and run them automatically at startup
+
 Every schema field should have descriptive documentation metadata.
 Do not rely on SQLite native comment reflection alone; preserve comment metadata in generator-managed per-column metadata that codegen can consume.
 
@@ -457,7 +464,7 @@ Validated on 2026-04-06 against the no-CGO runtime constraints and planned Go-Je
 Outcome:
 
 - `modernc.org/sqlite` remains aligned with Walens pure-Go deployment goals
-- `golang-migrate` remains aligned with embedded startup migrations
+- `pressly/goose` is aligned with embedded startup migrations while staying compatible with the pure-Go SQLite stack
 - migration 1 should remain SQLite setup and optimization only
 - SQLite comment support is not sufficient as a source for Jet `doc` tags
 - `doc` tags should be emitted by a generator hook at table/column granularity instead

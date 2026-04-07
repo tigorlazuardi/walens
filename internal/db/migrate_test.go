@@ -11,25 +11,11 @@ import (
 func openTestDB(t *testing.T, dsn string) *sql.DB {
 	t.Helper()
 
-	db, err := sql.Open("sqlite", dsn)
+	db, err := sql.Open("sqlite", sqliteDSN(dsn))
 	if err != nil {
 		t.Fatalf("open sqlite db: %v", err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-
-	pragmas := []string{
-		"PRAGMA foreign_keys = ON",
-		"PRAGMA busy_timeout = 5000",
-		"PRAGMA journal_mode = WAL",
-		"PRAGMA synchronous = NORMAL",
-		"PRAGMA cache_size = -2000",
-		"PRAGMA temp_store = MEMORY",
-	}
-	for _, pragma := range pragmas {
-		if _, err := db.Exec(pragma); err != nil {
-			t.Fatalf("apply pragma %q: %v", pragma, err)
-		}
-	}
 
 	return db
 }

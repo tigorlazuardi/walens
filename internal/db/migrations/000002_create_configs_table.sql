@@ -9,3 +9,6 @@ CREATE TABLE IF NOT EXISTS configs (
 );
 
 INSERT OR IGNORE INTO configs (id, value, updated_at) VALUES (1, '{}', 0);
+
+-- +goose down
+DROP TABLE IF EXISTS configs;

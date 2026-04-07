@@ -154,7 +154,7 @@ Core purpose only:
 - API framework: Huma.
 - Database: SQLite via pure-Go driver.
 - Query layer: Go-Jet generated models + query builder.
-- Migration tool: golang-migrate.
+- Migration tool: Goose.
 - Frontend dev integration: `github.com/olivere/vite`.
 - Background runtime: in-process scheduler + in-memory queue + in-process job runner.
 
@@ -1607,7 +1607,7 @@ This satisfies the no-CGO requirement and simplifies static builds across all su
 
 ### Migrations
 
-Use `golang-migrate` with SQLite driver.
+Use `pressly/goose` with SQLite.
 
 Plan:
 
@@ -1615,6 +1615,7 @@ Plan:
 - embed migrations into binary for production use
 - execute migrations automatically on startup
 - optionally add a migrate-only CLI mode later
+- use Goose single-file SQL migrations with `-- +goose up` / `-- +goose down`
 - keep migration schema changes synchronized with generator documentation metadata changes in the same development flow
 
 Migration ordering rule:
@@ -1650,7 +1651,7 @@ Validated on 2026-04-06 against the no-CGO deployment target and the planned Go-
 Outcome:
 
 - `modernc.org/sqlite` remains aligned with the pure-Go and no-CGO runtime constraints.
-- `golang-migrate` remains aligned with the migration strategy for embedded startup migrations.
+- `pressly/goose` remains aligned with the migration strategy for embedded startup migrations while staying compatible with the pure-Go SQLite stack.
 - the first migration should still be reserved for SQLite baseline setup and optimizations only.
 - SQLite comment support is insufficient for generating Jet `doc` tags from reflected schema metadata.
 - field-level `doc` tags should instead be produced by a custom generator hook keyed by table and column metadata.
@@ -1847,7 +1848,7 @@ Examples:
 
 1. Verify Huma + standard `net/http` bootstrapping.
 2. Verify `olivere/vite` integration with a plain Svelte + Vite SPA shell using runtime-injected base path config.
-3. Verify `modernc.org/sqlite` + `golang-migrate` compatibility.
+3. Verify `modernc.org/sqlite` + `pressly/goose` compatibility.
 4. Verify Go-Jet generation workflow against SQLite schema and confirm customization path.
 5. Verify cross-compilation and release packaging for 6 targets.
 6. Verify cron parser/library is pure Go and suitable for reloadable schedules.
