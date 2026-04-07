@@ -27,6 +27,8 @@ When working on a task that comes from Plane MCP:
 3. after the work is complete, create a git commit and push it, then provide a Markdown summary of what was done
 4. add a comment to the Plane task containing the GitHub commit URL, and include a rich-text HTML version of the Markdown summary in that same comment
 5. mark the task as `done` after the commit is pushed and the Plane comment has been added
+6. Sometimes a task has subtasks that has more detailed instructions. Make sure to do the subtasks first and also apply the task implementation rules to the subtasks.
+7. Do not add or update `AGENTS.md` during normal implementation tasks unless the work is a validation task or the user explicitly requests an `AGENTS.md` change.
 
 ## Product Scope
 
