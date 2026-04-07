@@ -141,7 +141,8 @@ func (a *App) buildHTTPHandler() http.Handler {
 	humaConfig.OpenAPIPath = joinPath(basePath, "/openapi")
 	humaConfig.DocsPath = joinPath(basePath, "/docs")
 	humaConfig.SchemasPath = joinPath(basePath, "/schemas")
-	_ = humago.New(mux, humaConfig)
+	api := humago.New(mux, humaConfig)
+	a.registerHumaRoutes(api, basePath)
 
 	// Build auth config for middleware
 	authConfig := auth.Config{
@@ -160,6 +161,44 @@ func (a *App) buildHTTPHandler() http.Handler {
 	}
 
 	return handler
+}
+
+type healthOutput struct {
+	Body struct {
+		Status    string `json:"status"`
+		QueueSize int    `json:"queue_size"`
+	}
+}
+
+func (a *App) registerHumaRoutes(api huma.API, basePath string) {
+	huma.Register(api, huma.Operation{
+		OperationID: "get-health",
+		Method:      http.MethodGet,
+		Path:        joinPath(basePath, "health"),
+		Summary:     "Get application health",
+		Description: "Returns Walens process health, including database availability and current in-memory queue size for infrastructure monitoring.",
+		Tags:        []string{"infra"},
+	}, func(ctx context.Context, input *struct{}) (*healthOutput, error) {
+		output := &healthOutput{}
+		output.Body.QueueSize = a.queue.Size()
+		output.Body.Status = "ok"
+
+		if a.db == nil {
+			output.Body.Status = "degraded"
+			return output, huma.Error503ServiceUnavailable("database unavailable")
+		}
+
+		pingCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		defer cancel()
+
+		if err := db.Ping(pingCtx, a.db); err != nil {
+			a.logger.Warn("health check: database ping failed", "error", err)
+			output.Body.Status = "degraded"
+			return output, huma.Error503ServiceUnavailable("database unavailable")
+		}
+
+		return output, nil
+	})
 }
 
 // startHTTPServer configures and starts the HTTP server with health endpoint.
@@ -193,50 +232,12 @@ func (a *App) startHTTPServer(ctx context.Context) error {
 
 // registerRoutes registers all HTTP routes on the given mux.
 func (a *App) registerRoutes(mux *http.ServeMux, basePath string, authConfig auth.Config) {
-	// Health endpoint
-	healthPath := joinPath(basePath, "health")
-	mux.HandleFunc(healthPath, a.handleHealth)
-
 	// Auth endpoints for browser cookie bootstrap.
 	authLoginPath := joinPath(basePath, "/api/login")
 	mux.HandleFunc(authLoginPath, a.makeAuthLoginHandler(authConfig))
 
 	authLogoutPath := joinPath(basePath, "/api/logout")
 	mux.HandleFunc(authLogoutPath, a.handleLogout)
-}
-
-// handleHealth returns the health status of the application.
-func (a *App) handleHealth(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	// Check DB connectivity
-	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
-	defer cancel()
-
-	dbOK := true
-	if a.db != nil {
-		if err := db.Ping(ctx, a.db); err != nil {
-			dbOK = false
-			a.logger.Warn("health check: database ping failed", "error", err)
-		}
-	} else {
-		dbOK = false
-	}
-
-	// Report status
-	status := "ok"
-	httpStatus := http.StatusOK
-	if !dbOK {
-		status = "degraded"
-		httpStatus = http.StatusServiceUnavailable
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(httpStatus)
-	fmt.Fprintf(w, `{"status":"%s","queue_size":%d}`, status, a.queue.Size())
 }
 
 // makeAuthLoginHandler creates a handler for the cookie bootstrap login endpoint.
