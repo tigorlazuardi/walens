@@ -65,8 +65,12 @@ func (a *App) Handler() http.Handler {
 // Start initializes and starts all application components.
 // Startup order: DB -> scheduler -> runner -> HTTP server.
 func (a *App) Start() error {
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
+	go func() {
+		<-ctx.Done()
+		cancel()
+	}()
 
 	// Validate auth config
 	if err := a.config.Auth.Validate(); err != nil {
@@ -88,18 +92,18 @@ func (a *App) Start() error {
 		return fmt.Errorf("failed to start runner: %w", err)
 	}
 
-	// 4. Start HTTP server (needs scheduler for health checks)
-	if err := a.startHTTPServer(); err != nil {
-		return fmt.Errorf("failed to start HTTP server: %w", err)
-	}
-
 	a.logger.Info("application started",
 		"host", a.config.Server.Host,
 		"port", a.config.Server.Port,
 		"base_path", a.config.Server.BasePath,
 	)
 
-	return a.waitForShutdown()
+	// 4. Start HTTP server (needs scheduler for health checks)
+	if err := a.startHTTPServer(ctx); err != nil {
+		return fmt.Errorf("failed to start HTTP server: %w", err)
+	}
+
+	return a.waitForShutdown(ctx)
 }
 
 // initDB opens the database connection and applies SQLite pragmas.
@@ -159,28 +163,32 @@ func (a *App) buildHTTPHandler() http.Handler {
 }
 
 // startHTTPServer configures and starts the HTTP server with health endpoint.
-func (a *App) startHTTPServer() error {
+func (a *App) startHTTPServer(ctx context.Context) error {
 	basePath := a.config.Server.BasePath
 	a.handler = a.buildHTTPHandler()
-
 	a.logger.Info("HTTP server configured", "base_path", basePath)
-
 	a.server = &http.Server{
-		Addr:         fmt.Sprintf("%s:%d", a.config.Server.Host, a.config.Server.Port),
-		Handler:      a.handler,
-		ReadTimeout:  30 * time.Second,
-		WriteTimeout: 30 * time.Second,
-		IdleTimeout:  60 * time.Second,
+		Addr:              fmt.Sprintf("%s:%d", a.config.Server.Host, a.config.Server.Port),
+		Handler:           a.handler,
+		ReadHeaderTimeout: 10 * time.Second,
+		IdleTimeout:       60 * time.Second,
 	}
-
+	err := make(chan error, 1)
 	go func() {
 		a.logger.Info("HTTP server listening", "addr", a.server.Addr)
-		if err := a.server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			a.logger.Error("HTTP server error", "error", err)
-		}
+		err <- a.server.ListenAndServe()
 	}()
-
-	return nil
+	select {
+	case err := <-err:
+		return fmt.Errorf("failed to start server: %w", err)
+	case <-ctx.Done():
+		ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Second*5)
+		defer cancel()
+		if err := a.server.Shutdown(ctx); err != nil {
+			a.logger.ErrorContext(ctx, "failed to shutdown server", "error", err)
+		}
+		return nil
+	}
 }
 
 // registerRoutes registers all HTTP routes on the given mux.
@@ -271,28 +279,13 @@ func (a *App) handleLogout(w http.ResponseWriter, r *http.Request) {
 
 // waitForShutdown listens for shutdown signals and orchestrates graceful shutdown.
 // Shutdown order (reverse of startup):
-//   - HTTP server (stop accepting new connections)
 //   - queue close (stop accepting new jobs, wake runner)
 //   - runner stop (let runner drain current job then exit)
 //   - scheduler stop
 //   - DB close
-func (a *App) waitForShutdown() error {
-	quit := make(chan os.Signal, 1)
-	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
-
-	sig := <-quit
-	a.logger.Info("shutdown signal received", "signal", sig)
-
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+func (a *App) waitForShutdown(ctx context.Context) error {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 	defer cancel()
-
-	// 1. Shutdown HTTP server
-	a.logger.Info("shutting down HTTP server")
-	if err := a.server.Shutdown(ctx); err != nil {
-		a.logger.Error("HTTP server shutdown error", "error", err)
-	} else {
-		a.logger.Info("HTTP server stopped")
-	}
 
 	// 2. Close queue (stop accepting new jobs, wake runner's dequeue)
 	a.logger.Info("closing queue")
