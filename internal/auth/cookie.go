@@ -1,10 +1,13 @@
 package auth
 
 import (
-	"crypto/hmac"
+	"crypto/aes"
+	"crypto/cipher"
+	"crypto/rand"
 	"crypto/sha256"
-	"crypto/subtle"
 	"encoding/base64"
+	"errors"
+	"io"
 	"net/http"
 	"strings"
 )
@@ -16,14 +19,30 @@ const (
 	cookieScope  = "walens-auth"
 )
 
-// BuildCookieValue creates a signed cookie value from credentials.
-func BuildCookieValue(username, password string) string {
-	data := username + ":" + password
-	encodedData := base64.URLEncoding.EncodeToString([]byte(data))
-	h := hmac.New(sha256.New, []byte(data))
-	_, _ = h.Write([]byte(encodedData + ":" + cookieScope))
-	sig := base64.URLEncoding.EncodeToString(h.Sum(nil))
-	return encodedData + "." + sig
+var errInvalidCookieValue = errors.New("invalid cookie value")
+
+// BuildCookieValue creates an encrypted cookie value from credentials.
+func BuildCookieValue(secret, username, password string) (string, error) {
+	plaintext := []byte(username + ":" + password)
+
+	block, err := aes.NewCipher(deriveCookieKey(secret))
+	if err != nil {
+		return "", err
+	}
+
+	aead, err := cipher.NewGCM(block)
+	if err != nil {
+		return "", err
+	}
+
+	nonce := make([]byte, aead.NonceSize())
+	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
+		return "", err
+	}
+
+	ciphertext := aead.Seal(nil, nonce, plaintext, []byte(cookieScope))
+	payload := append(nonce, ciphertext...)
+	return base64.RawURLEncoding.EncodeToString(payload), nil
 }
 
 // ValidateCookieValue checks if a cookie value is valid for the given credentials.
@@ -33,32 +52,52 @@ func (c Config) ValidateCookieValue(cookieValue string) error {
 
 // validateCookieValue checks if a cookie value matches the configured credentials.
 func (c Config) validateCookieValue(cookieValue string) error {
-	parts := strings.SplitN(cookieValue, ".", 2)
-	if len(parts) != 2 {
-		return ErrInvalidCredentials
-	}
-
-	expectedSig := parts[1]
-	data, err := base64.URLEncoding.DecodeString(parts[0])
+	plaintext, err := decryptCookieValue(c.CookieSecret, cookieValue)
 	if err != nil {
 		return ErrInvalidCredentials
 	}
 
-	// Verify signature using the configured credentials as the key
-	h := hmac.New(sha256.New, []byte(c.Username+":"+c.Password))
-	_, _ = h.Write([]byte(parts[0] + ":" + cookieScope))
-	sig := base64.URLEncoding.EncodeToString(h.Sum(nil))
-
-	if subtle.ConstantTimeCompare([]byte(expectedSig), []byte(sig)) != 1 {
-		return ErrInvalidCredentials
-	}
-
-	decodedParts := strings.SplitN(string(data), ":", 2)
+	decodedParts := strings.SplitN(string(plaintext), ":", 2)
 	if len(decodedParts) != 2 {
 		return ErrInvalidCredentials
 	}
 
 	return c.validateCredentials(decodedParts[0], decodedParts[1])
+}
+
+func decryptCookieValue(secret, cookieValue string) ([]byte, error) {
+	payload, err := base64.RawURLEncoding.DecodeString(cookieValue)
+	if err != nil {
+		return nil, errInvalidCookieValue
+	}
+
+	block, err := aes.NewCipher(deriveCookieKey(secret))
+	if err != nil {
+		return nil, errInvalidCookieValue
+	}
+
+	aead, err := cipher.NewGCM(block)
+	if err != nil {
+		return nil, errInvalidCookieValue
+	}
+
+	if len(payload) < aead.NonceSize() {
+		return nil, errInvalidCookieValue
+	}
+
+	nonce := payload[:aead.NonceSize()]
+	ciphertext := payload[aead.NonceSize():]
+	plaintext, err := aead.Open(nil, nonce, ciphertext, []byte(cookieScope))
+	if err != nil {
+		return nil, errInvalidCookieValue
+	}
+
+	return plaintext, nil
+}
+
+func deriveCookieKey(secret string) []byte {
+	sum := sha256.Sum256([]byte(secret))
+	return sum[:]
 }
 
 // CookieOptions holds options for cookie creation.
@@ -68,12 +107,8 @@ type CookieOptions struct {
 	Path     string
 }
 
-// DefaultCookieOptions returns default cookie options suitable for most deployments.
-func DefaultCookieOptions(r *http.Request, basePath string) CookieOptions {
-	secure := r.TLS != nil
-	if strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https") {
-		secure = true
-	}
+// DefaultCookieOptions returns default cookie options from explicit config.
+func DefaultCookieOptions(basePath string, secure bool) CookieOptions {
 	path := strings.TrimSpace(basePath)
 	if path == "" {
 		path = "/"
@@ -115,13 +150,13 @@ func ClearAuthCookie(basePath string) *http.Cookie {
 }
 
 // SetAuthCookie sets the auth cookie on the response.
-func SetAuthCookie(w http.ResponseWriter, r *http.Request, basePath, value string) {
-	opts := DefaultCookieOptions(r, basePath)
+func SetAuthCookie(w http.ResponseWriter, basePath string, secure bool, value string) {
+	opts := DefaultCookieOptions(basePath, secure)
 	cookie := NewAuthCookie(value, opts)
 	http.SetCookie(w, cookie)
 }
 
-// ClearAuthCookieHandler clears the auth cookie and redirects to login.
+// ClearAuthCookieHandler clears the auth cookie.
 func ClearAuthCookieHandler(w http.ResponseWriter, r *http.Request, basePath string) {
 	cookie := ClearAuthCookie(basePath)
 	http.SetCookie(w, cookie)

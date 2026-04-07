@@ -3,11 +3,11 @@ package app
 import (
 	"database/sql"
 	"encoding/base64"
+	"encoding/json"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
 	"strings"
 	"testing"
 
@@ -17,6 +17,8 @@ import (
 
 	_ "modernc.org/sqlite"
 )
+
+const testCookieSecret = "test-cookie-secret"
 
 func TestAuthConfigValidation(t *testing.T) {
 	tests := []struct {
@@ -45,36 +47,50 @@ func TestAuthConfigValidation(t *testing.T) {
 		{
 			name: "auth enabled with valid credentials is valid",
 			cfg: config.AuthConfig{
-				Enabled:  true,
-				Username: "user",
-				Password: "pass",
+				Enabled:      true,
+				Username:     "user",
+				Password:     "pass",
+				CookieSecret: testCookieSecret,
 			},
 			wantErr: false,
 		},
 		{
 			name: "auth enabled with empty username is invalid",
 			cfg: config.AuthConfig{
-				Enabled:  true,
-				Username: "",
-				Password: "pass",
+				Enabled:      true,
+				Username:     "",
+				Password:     "pass",
+				CookieSecret: testCookieSecret,
 			},
 			wantErr: true,
 		},
 		{
 			name: "auth enabled with empty password is invalid",
 			cfg: config.AuthConfig{
-				Enabled:  true,
-				Username: "user",
-				Password: "",
+				Enabled:      true,
+				Username:     "user",
+				Password:     "",
+				CookieSecret: testCookieSecret,
 			},
 			wantErr: true,
 		},
 		{
 			name: "auth enabled with both empty is invalid",
 			cfg: config.AuthConfig{
-				Enabled:  true,
-				Username: "",
-				Password: "",
+				Enabled:      true,
+				Username:     "",
+				Password:     "",
+				CookieSecret: testCookieSecret,
+			},
+			wantErr: true,
+		},
+		{
+			name: "auth enabled with empty cookie secret is invalid",
+			cfg: config.AuthConfig{
+				Enabled:      true,
+				Username:     "user",
+				Password:     "pass",
+				CookieSecret: "",
 			},
 			wantErr: true,
 		},
@@ -92,9 +108,10 @@ func TestAuthConfigValidation(t *testing.T) {
 
 func TestAuthAuthorize(t *testing.T) {
 	authCfg := auth.Config{
-		Enabled:  true,
-		Username: "testuser",
-		Password: "testpass",
+		Enabled:      true,
+		Username:     "testuser",
+		Password:     "testpass",
+		CookieSecret: testCookieSecret,
 	}
 
 	disabledAuthCfg := auth.Config{
@@ -184,15 +201,16 @@ func TestAuthAuthorize(t *testing.T) {
 
 func TestAuthCookieValidation(t *testing.T) {
 	authCfg := auth.Config{
-		Enabled:  true,
-		Username: "testuser",
-		Password: "testpass",
+		Enabled:      true,
+		Username:     "testuser",
+		Password:     "testpass",
+		CookieSecret: testCookieSecret,
 	}
 
 	// Create a valid cookie value
-	validCookieValue := auth.BuildCookieValue("testuser", "testpass")
-	wrongUserCookieValue := auth.BuildCookieValue("wronguser", "testpass")
-	wrongPassCookieValue := auth.BuildCookieValue("testuser", "wrongpass")
+	validCookieValue, _ := auth.BuildCookieValue(testCookieSecret, "testuser", "testpass")
+	wrongUserCookieValue, _ := auth.BuildCookieValue(testCookieSecret, "wronguser", "testpass")
+	wrongPassCookieValue, _ := auth.BuildCookieValue(testCookieSecret, "testuser", "wrongpass")
 
 	tests := []struct {
 		name      string
@@ -259,9 +277,10 @@ func TestAppWithAuth(t *testing.T) {
 			Path: dbPath,
 		},
 		Auth: config.AuthConfig{
-			Enabled:  true,
-			Username: "testuser",
-			Password: "testpass",
+			Enabled:      true,
+			Username:     "testuser",
+			Password:     "testpass",
+			CookieSecret: testCookieSecret,
 		},
 		DataDir:  tmpDir,
 		LogLevel: "error",
@@ -329,7 +348,7 @@ func TestAppWithAuth(t *testing.T) {
 			path:   "/api/logout",
 			setupReq: func(r *http.Request) {
 				// Set a valid auth cookie
-				cookieValue := auth.BuildCookieValue("testuser", "testpass")
+				cookieValue, _ := auth.BuildCookieValue(testCookieSecret, "testuser", "testpass")
 				r.AddCookie(&http.Cookie{Name: auth.CookieName, Value: cookieValue})
 			},
 			expectedStatus: http.StatusNoContent,
@@ -390,9 +409,10 @@ func TestLoginFlow(t *testing.T) {
 			Path: dbPath,
 		},
 		Auth: config.AuthConfig{
-			Enabled:  true,
-			Username: "testuser",
-			Password: "testpass",
+			Enabled:      true,
+			Username:     "testuser",
+			Password:     "testpass",
+			CookieSecret: testCookieSecret,
 		},
 		DataDir:  tmpDir,
 		LogLevel: "error",
@@ -409,11 +429,9 @@ func TestLoginFlow(t *testing.T) {
 
 	// Login with valid credentials
 	t.Run("valid login sets cookie", func(t *testing.T) {
-		form := url.Values{}
-		form.Set("username", "testuser")
-		form.Set("password", "testpass")
-		req := httptest.NewRequest(http.MethodPost, "/api/login", strings.NewReader(form.Encode()))
-		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		body, _ := json.Marshal(map[string]string{"username": "testuser", "password": "testpass"})
+		req := httptest.NewRequest(http.MethodPost, "/api/login", strings.NewReader(string(body)))
+		req.Header.Set("Content-Type", "application/json")
 
 		rec := httptest.NewRecorder()
 		handler.ServeHTTP(rec, req)
@@ -438,11 +456,9 @@ func TestLoginFlow(t *testing.T) {
 
 	// Login with invalid credentials
 	t.Run("invalid login returns 401", func(t *testing.T) {
-		form := url.Values{}
-		form.Set("username", "wronguser")
-		form.Set("password", "wrongpass")
-		req := httptest.NewRequest(http.MethodPost, "/api/login", strings.NewReader(form.Encode()))
-		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		body, _ := json.Marshal(map[string]string{"username": "wronguser", "password": "wrongpass"})
+		req := httptest.NewRequest(http.MethodPost, "/api/login", strings.NewReader(string(body)))
+		req.Header.Set("Content-Type", "application/json")
 
 		rec := httptest.NewRecorder()
 		handler.ServeHTTP(rec, req)
@@ -453,11 +469,9 @@ func TestLoginFlow(t *testing.T) {
 	})
 
 	t.Run("cookie allows access after login", func(t *testing.T) {
-		form := url.Values{}
-		form.Set("username", "testuser")
-		form.Set("password", "testpass")
-		loginReq := httptest.NewRequest(http.MethodPost, "/api/login", strings.NewReader(form.Encode()))
-		loginReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		body, _ := json.Marshal(map[string]string{"username": "testuser", "password": "testpass"})
+		loginReq := httptest.NewRequest(http.MethodPost, "/api/login", strings.NewReader(string(body)))
+		loginReq.Header.Set("Content-Type", "application/json")
 		loginRec := httptest.NewRecorder()
 		handler.ServeHTTP(loginRec, loginReq)
 
@@ -559,13 +573,14 @@ func TestAuthDisabledAllowAccess(t *testing.T) {
 // does not fall back to validating a cookie.
 func TestInvalidHeaderDoesNotFallbackToCookie(t *testing.T) {
 	authCfg := auth.Config{
-		Enabled:  true,
-		Username: "testuser",
-		Password: "testpass",
+		Enabled:      true,
+		Username:     "testuser",
+		Password:     "testpass",
+		CookieSecret: testCookieSecret,
 	}
 
 	// Create a valid cookie
-	validCookie := auth.BuildCookieValue("testuser", "testpass")
+	validCookie, _ := auth.BuildCookieValue(testCookieSecret, "testuser", "testpass")
 
 	// Make request with invalid Basic auth header AND valid cookie
 	// The auth should fail because the header is checked first and is invalid
@@ -584,13 +599,14 @@ func TestInvalidHeaderDoesNotFallbackToCookie(t *testing.T) {
 // when there's no Authorization header.
 func TestCookieAllowsAccessAfterNoHeader(t *testing.T) {
 	authCfg := auth.Config{
-		Enabled:  true,
-		Username: "testuser",
-		Password: "testpass",
+		Enabled:      true,
+		Username:     "testuser",
+		Password:     "testpass",
+		CookieSecret: testCookieSecret,
 	}
 
 	// Create a valid cookie
-	validCookie := auth.BuildCookieValue("testuser", "testpass")
+	validCookie, _ := auth.BuildCookieValue(testCookieSecret, "testuser", "testpass")
 
 	// Make request with valid cookie but no Authorization header
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
@@ -623,9 +639,10 @@ func TestBasePathRoutes(t *testing.T) {
 			Path: dbPath,
 		},
 		Auth: config.AuthConfig{
-			Enabled:  true,
-			Username: "testuser",
-			Password: "testpass",
+			Enabled:      true,
+			Username:     "testuser",
+			Password:     "testpass",
+			CookieSecret: testCookieSecret,
 		},
 		DataDir:  tmpDir,
 		LogLevel: "error",
@@ -680,12 +697,10 @@ func TestBasePathRoutes(t *testing.T) {
 			method: http.MethodPost,
 			path:   "/walens/api/login",
 			setupReq: func(r *http.Request) {
-				form := url.Values{}
-				form.Set("username", "testuser")
-				form.Set("password", "testpass")
-				r.Body = io.NopCloser(strings.NewReader(form.Encode()))
-				r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-				r.ContentLength = int64(len(form.Encode()))
+				body := `{"username":"testuser","password":"testpass"}`
+				r.Body = io.NopCloser(strings.NewReader(body))
+				r.Header.Set("Content-Type", "application/json")
+				r.ContentLength = int64(len(body))
 			},
 			expectedStatus: http.StatusNoContent,
 		},

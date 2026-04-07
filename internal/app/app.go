@@ -24,6 +24,8 @@ import (
 	"github.com/walens/walens/internal/scheduler"
 )
 
+type authCookieSecureContextKey struct{}
+
 // App manages the lifecycle of all application components.
 type App struct {
 	config    *config.Config
@@ -142,22 +144,25 @@ func (a *App) buildHTTPHandler() http.Handler {
 	humaConfig.DocsPath = joinPath(basePath, "/docs")
 	humaConfig.SchemasPath = joinPath(basePath, "/schemas")
 	api := humago.New(mux, humaConfig)
-	a.registerHumaRoutes(api, basePath)
 
 	// Build auth config for middleware
 	authConfig := auth.Config{
-		Enabled:  a.config.Auth.Enabled,
-		Username: a.config.Auth.Username,
-		Password: a.config.Auth.Password,
-		BasePath: a.config.Server.BasePath,
+		Enabled:      a.config.Auth.Enabled,
+		Username:     a.config.Auth.Username,
+		Password:     a.config.Auth.Password,
+		BasePath:     a.config.Server.BasePath,
+		CookieSecure: a.config.Auth.CookieSecure,
+		CookieSecret: a.config.Auth.CookieSecret,
 	}
 
-	// Register routes with base path
-	a.registerRoutes(mux, basePath, authConfig)
+	a.registerHumaRoutes(api, basePath, authConfig)
 
-	var handler http.Handler = mux
+	var handler http.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ctx := context.WithValue(r.Context(), authCookieSecureContextKey{}, authConfig.CookieSecure)
+		mux.ServeHTTP(w, r.WithContext(ctx))
+	})
 	if authConfig.Enabled {
-		handler = authConfig.Middleware()(mux)
+		handler = authConfig.Middleware()(handler)
 	}
 
 	return handler
@@ -170,7 +175,41 @@ type healthOutput struct {
 	}
 }
 
-func (a *App) registerHumaRoutes(api huma.API, basePath string) {
+type loginInput struct {
+	Body struct {
+		Username string `json:"username" doc:"Bootstrap auth username."`
+		Password string `json:"password" doc:"Bootstrap auth password."`
+	}
+}
+
+type loginOutput struct {
+	SetCookie string `header:"Set-Cookie"`
+}
+
+type logoutInput struct {
+	Secure   bool   `json:"-"`
+	BasePath string `json:"-"`
+}
+
+type logoutOutput struct{}
+
+var _ huma.Resolver = (*logoutInput)(nil)
+
+func (i *logoutInput) Resolve(ctx huma.Context) []error {
+	if secure, ok := ctx.Context().Value(authCookieSecureContextKey{}).(bool); ok {
+		i.Secure = secure
+	}
+	i.BasePath = strings.TrimSuffix(ctx.Operation().Path, "/api/logout")
+	if i.BasePath == "" {
+		i.BasePath = "/"
+	}
+	cookie := auth.ClearAuthCookie(i.BasePath)
+	cookie.Secure = i.Secure
+	ctx.AppendHeader("Set-Cookie", cookie.String())
+	return nil
+}
+
+func (a *App) registerHumaRoutes(api huma.API, basePath string, authConfig auth.Config) {
 	huma.Register(api, huma.Operation{
 		OperationID: "get-health",
 		Method:      http.MethodGet,
@@ -198,6 +237,41 @@ func (a *App) registerHumaRoutes(api huma.API, basePath string) {
 		}
 
 		return output, nil
+	})
+
+	huma.Register(api, huma.Operation{
+		OperationID: "post-login",
+		Method:      http.MethodPost,
+		Path:        joinPath(basePath, "/api/login"),
+		Summary:     "Bootstrap browser auth cookie",
+		Description: "Validates bootstrap Basic Auth credentials and sets an HTTP-only auth cookie for browser clients. Native or external clients should use the Authorization header directly instead of this endpoint.",
+		Tags:        []string{"auth"},
+	}, func(ctx context.Context, input *loginInput) (*loginOutput, error) {
+		if err := authConfig.ValidateCredentials(input.Body.Username, input.Body.Password); err != nil {
+			return nil, huma.Error401Unauthorized("invalid credentials")
+		}
+
+		cookieValue, err := auth.BuildCookieValue(authConfig.CookieSecret, input.Body.Username, input.Body.Password)
+		if err != nil {
+			return nil, huma.Error500InternalServerError("failed to build auth cookie", err)
+		}
+		cookie := auth.NewAuthCookie(cookieValue, auth.CookieOptions{
+			Secure:   authConfig.CookieSecure,
+			SameSite: http.SameSiteLaxMode,
+			Path:     basePath,
+		})
+		return &loginOutput{SetCookie: cookie.String()}, nil
+	})
+
+	huma.Register(api, huma.Operation{
+		OperationID: "post-logout",
+		Method:      http.MethodPost,
+		Path:        joinPath(basePath, "/api/logout"),
+		Summary:     "Clear browser auth cookie",
+		Description: "Clears the HTTP-only browser auth cookie. Header-based clients should simply stop sending Authorization credentials.",
+		Tags:        []string{"auth"},
+	}, func(ctx context.Context, input *logoutInput) (*logoutOutput, error) {
+		return &logoutOutput{}, nil
 	})
 }
 
@@ -228,54 +302,6 @@ func (a *App) startHTTPServer(ctx context.Context) error {
 		}
 		return nil
 	}
-}
-
-// registerRoutes registers all HTTP routes on the given mux.
-func (a *App) registerRoutes(mux *http.ServeMux, basePath string, authConfig auth.Config) {
-	// Auth endpoints for browser cookie bootstrap.
-	authLoginPath := joinPath(basePath, "/api/login")
-	mux.HandleFunc(authLoginPath, a.makeAuthLoginHandler(authConfig))
-
-	authLogoutPath := joinPath(basePath, "/api/logout")
-	mux.HandleFunc(authLogoutPath, a.handleLogout)
-}
-
-// makeAuthLoginHandler creates a handler for the cookie bootstrap login endpoint.
-func (a *App) makeAuthLoginHandler(authConfig auth.Config) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
-			http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
-			return
-		}
-
-		if err := r.ParseForm(); err != nil {
-			http.Error(w, "Bad Request", http.StatusBadRequest)
-			return
-		}
-
-		username := r.FormValue("username")
-		password := r.FormValue("password")
-
-		if err := authConfig.ValidateCredentials(username, password); err == nil {
-			cookieValue := auth.BuildCookieValue(username, password)
-			auth.SetAuthCookie(w, r, a.config.Server.BasePath, cookieValue)
-			w.WriteHeader(http.StatusNoContent)
-			return
-		}
-
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
-	}
-}
-
-// handleLogout clears the auth cookie.
-func (a *App) handleLogout(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	auth.ClearAuthCookieHandler(w, r, a.config.Server.BasePath)
-	w.WriteHeader(http.StatusNoContent)
 }
 
 // waitForShutdown listens for shutdown signals and orchestrates graceful shutdown.

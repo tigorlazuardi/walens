@@ -17,21 +17,23 @@ var ErrInvalidCredentials = errors.New("invalid credentials")
 // ErrMissingCredentials is returned when no credentials are provided.
 var ErrMissingCredentials = errors.New("missing credentials")
 
-// ErrAuthEnabledButNotConfigured is returned when auth is enabled but username or password is empty.
-var ErrAuthEnabledButNotConfigured = errors.New("auth is enabled but username or password is not configured")
+// ErrAuthEnabledButNotConfigured is returned when auth is enabled but required auth settings are empty.
+var ErrAuthEnabledButNotConfigured = errors.New("auth is enabled but username, password, or cookie secret is not configured")
 
 // Config holds authentication configuration.
 type Config struct {
-	Enabled  bool
-	Username string
-	Password string
-	BasePath string // e.g., "/" or "/walens"
+	Enabled      bool
+	Username     string
+	Password     string
+	BasePath     string // e.g., "/" or "/walens"
+	CookieSecure bool
+	CookieSecret string
 }
 
 // Validate checks that if auth is enabled, username and password are non-empty.
 func (c Config) Validate() error {
 	if c.Enabled {
-		if c.Username == "" || c.Password == "" {
+		if c.Username == "" || c.Password == "" || c.CookieSecret == "" {
 			return ErrAuthEnabledButNotConfigured
 		}
 	}

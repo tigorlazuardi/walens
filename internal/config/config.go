@@ -6,8 +6,8 @@ import (
 	"strconv"
 )
 
-// ErrAuthEnabledButNotConfigured is returned when auth is enabled but username or password is empty.
-var ErrAuthEnabledButNotConfigured = errors.New("auth is enabled but username or password is not configured")
+// ErrAuthEnabledButNotConfigured is returned when auth is enabled but required auth settings are empty.
+var ErrAuthEnabledButNotConfigured = errors.New("auth is enabled but username, password, or cookie secret is not configured")
 
 type Config struct {
 	Server   ServerConfig
@@ -28,15 +28,17 @@ type DatabaseConfig struct {
 }
 
 type AuthConfig struct {
-	Enabled  bool
-	Username string
-	Password string
+	Enabled      bool
+	Username     string
+	Password     string
+	CookieSecure bool
+	CookieSecret string
 }
 
 // Validate checks that if auth is enabled, username and password are non-empty.
 func (c AuthConfig) Validate() error {
 	if c.Enabled {
-		if c.Username == "" || c.Password == "" {
+		if c.Username == "" || c.Password == "" || c.CookieSecret == "" {
 			return ErrAuthEnabledButNotConfigured
 		}
 	}
@@ -54,9 +56,11 @@ func Load() *Config {
 			Path: getEnv("WALENS_DB_PATH", "./data/walens.db"),
 		},
 		Auth: AuthConfig{
-			Enabled:  getEnvBool("WALENS_AUTH_ENABLED", false),
-			Username: getEnv("WALENS_AUTH_USERNAME", ""),
-			Password: getEnv("WALENS_AUTH_PASSWORD", ""),
+			Enabled:      getEnvBool("WALENS_AUTH_ENABLED", false),
+			Username:     getEnv("WALENS_AUTH_USERNAME", ""),
+			Password:     getEnv("WALENS_AUTH_PASSWORD", ""),
+			CookieSecure: getEnvBool("WALENS_AUTH_COOKIE_SECURE", false),
+			CookieSecret: getEnv("WALENS_AUTH_COOKIE_SECRET", ""),
 		},
 		DataDir:  getEnv("WALENS_DATA_DIR", "./data"),
 		LogLevel: getEnv("WALENS_LOG_LEVEL", "info"),
