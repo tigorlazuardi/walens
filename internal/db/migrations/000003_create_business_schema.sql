@@ -18,6 +18,7 @@ CREATE TABLE IF NOT EXISTS devices (
     min_filesize INTEGER NOT NULL DEFAULT 0,
     max_filesize INTEGER NOT NULL DEFAULT 0,
     is_adult_allowed INTEGER NOT NULL DEFAULT 0,
+    is_enabled INTEGER NOT NULL DEFAULT 1,
     aspect_ratio_tolerance REAL NOT NULL DEFAULT 0.15,
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL

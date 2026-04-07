@@ -293,6 +293,7 @@ Suggested columns:
 - `min_filesize` INTEGER not null default 0
 - `max_filesize` INTEGER not null default 0
 - `is_adult_allowed` INTEGER not null default 0
+- `is_enabled` INTEGER not null default 1
 - `aspect_ratio_tolerance` REAL not null default 0.15
 - `created_at` INTEGER not null
 - `updated_at` INTEGER not null

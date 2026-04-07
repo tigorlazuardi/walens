@@ -200,6 +200,7 @@ func TestBusinessSchemaColumnPresence(t *testing.T) {
 		{"devices", "screen_width", "INTEGER"},
 		{"devices", "aspect_ratio_tolerance", "REAL"},
 		{"devices", "is_adult_allowed", "INTEGER"},
+		{"devices", "is_enabled", "INTEGER"},
 		{"devices", "created_at", "INTEGER"},
 		// sources
 		{"sources", "id", "TEXT"},
@@ -252,7 +253,7 @@ func TestBusinessSchemaForeignKeys(t *testing.T) {
 
 	// Verify foreign keys are enforced by testing cascade delete.
 	// Insert a device, then a subscription, delete device, subscription should be gone.
-	deviceInsert := "INSERT INTO devices (id, name, slug, screen_width, screen_height, created_at, updated_at) VALUES ('dev1', 'Test Device', 'test-device', 1920, 1080, 0, 0)"
+	deviceInsert := "INSERT INTO devices (id, name, slug, screen_width, screen_height, is_enabled, created_at, updated_at) VALUES ('dev1', 'Test Device', 'test-device', 1920, 1080, 1, 0, 0)"
 	if _, err := db.Exec(deviceInsert); err != nil {
 		t.Fatalf("insert test device: %v", err)
 	}
