@@ -303,6 +303,7 @@ Route layer rules:
 
 - thin only
 - define Huma operation metadata
+- keep each `huma.Operation` definition next to its handler in the same route file instead of inlining it at the `huma.Register(...)` call site
 - translate DTOs if needed
 - call service methods
 - do not hold business logic

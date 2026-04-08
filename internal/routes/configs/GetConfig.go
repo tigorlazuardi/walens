@@ -3,10 +3,23 @@ package configs
 import (
 	"context"
 	"errors"
+	"path"
 
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/walens/walens/internal/services/configs"
 )
+
+// GetConfigOperation returns the Huma operation metadata for GetConfig.
+func GetConfigOperation(basePath string) huma.Operation {
+	return huma.Operation{
+		OperationID: "post-configs-get-config",
+		Method:      "POST",
+		Path:        path.Join(basePath, "/api/v1/configs/GetConfig"),
+		Summary:     "Get persisted config",
+		Description: "Returns the current persisted configuration. Initializes defaults if no config exists. Note: BasePath and Auth settings are bootstrap-only and not included.",
+		Tags:        []string{"configs"},
+	}
+}
 
 // GetConfigInput describes the request body for GetConfig (currently empty).
 type GetConfigInput struct {
