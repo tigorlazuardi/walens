@@ -22,6 +22,7 @@ import (
 	"github.com/walens/walens/internal/queue"
 	"github.com/walens/walens/internal/runner"
 	"github.com/walens/walens/internal/scheduler"
+	"github.com/walens/walens/internal/services/configs"
 )
 
 type authCookieSecureContextKey struct{}
@@ -122,6 +123,29 @@ func (a *App) initDB() error {
 		return fmt.Errorf("failed to run migrations: %w", err)
 	}
 	a.logger.Info("database migrations applied")
+
+	// Load persisted config after migrations. If absent or empty, inject defaults.
+	configService := configs.NewService(a.db)
+	defaultPersistedCfg := configs.DefaultPersistedConfig(a.config)
+	persistedCfg, err := configService.BootstrapDefault(context.Background(), defaultPersistedCfg)
+	if err != nil {
+		return fmt.Errorf("failed to bootstrap persisted config: %w", err)
+	}
+	a.logger.Info("persisted config loaded",
+		"base_path", persistedCfg.Server.BasePath,
+		"data_dir", persistedCfg.DataDir,
+		"log_level", persistedCfg.LogLevel,
+	)
+
+	// Apply persisted config back to active config so runtime uses DB values.
+	a.config.ApplyPersistedConfig(persistedCfg.Server.BasePath, persistedCfg.DataDir, persistedCfg.LogLevel)
+
+	// Rebuild logger with persisted log level, then rebuild dependent components.
+	a.logger = logger.New(persistedCfg.LogLevel)
+	a.queue = queue.New(a.logger)
+	a.runner = runner.New(a.logger)
+	a.runner.SetQueue(a.queue)
+	a.scheduler = scheduler.New(a.logger)
 
 	// Give scheduler access to DB for reload queries
 	a.scheduler.SetDB(a.db)

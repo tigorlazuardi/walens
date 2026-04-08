@@ -45,6 +45,16 @@ func (c AuthConfig) Validate() error {
 	return nil
 }
 
+// ApplyPersistedConfig updates the runtime config with values from persisted storage.
+// Only persisted fields (basePath, dataDir, logLevel) are applied.
+// Bootstrap-only fields (Host, Port, Database.Path, Auth.*) are preserved from the
+// bootstrap config and are not overwritten by persisted values.
+func (c *Config) ApplyPersistedConfig(basePath, dataDir, logLevel string) {
+	c.Server.BasePath = basePath
+	c.DataDir = dataDir
+	c.LogLevel = logLevel
+}
+
 func Load() *Config {
 	return &Config{
 		Server: ServerConfig{

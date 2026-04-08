@@ -13,7 +13,11 @@ import (
 
 	"github.com/walens/walens/internal/auth"
 	"github.com/walens/walens/internal/config"
+	"github.com/walens/walens/internal/db"
 	"github.com/walens/walens/internal/queue"
+	"github.com/walens/walens/internal/runner"
+	"github.com/walens/walens/internal/scheduler"
+	"github.com/walens/walens/internal/services/configs"
 
 	_ "modernc.org/sqlite"
 )
@@ -718,5 +722,242 @@ func TestBasePathRoutes(t *testing.T) {
 				t.Errorf("expected status %d, got %d", tt.expectedStatus, rec.Code)
 			}
 		})
+	}
+}
+
+// TestInitDBAppliesPersistedConfig tests that initDB loads persisted config and
+// applies it back to the active app config.
+func TestInitDBAppliesPersistedConfig(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := tmpDir + "/test.db"
+
+	testDB, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("failed to open test db: %v", err)
+	}
+	defer testDB.Close()
+
+	// Run migrations first
+	if err := db.RunMigrations(testDB); err != nil {
+		t.Fatalf("RunMigrations failed: %v", err)
+	}
+
+	// Insert a custom persisted config
+	customCfg := &configs.PersistedConfig{
+		Server: configs.PersistedServerConfig{
+			BasePath: "/custom-path",
+		},
+		DataDir:  "/custom/data",
+		LogLevel: "debug",
+	}
+	customBytes, _ := json.Marshal(customCfg)
+	_, err = testDB.Exec(`UPDATE configs SET value = ?, updated_at = ? WHERE id = 1`, string(customBytes), 1000)
+	if err != nil {
+		t.Fatalf("insert custom config: %v", err)
+	}
+
+	// Create bootstrap config
+	bootstrapCfg := &config.Config{
+		Server: config.ServerConfig{
+			Host:     "localhost",
+			Port:     9999,
+			BasePath: "/",
+		},
+		Database: config.DatabaseConfig{
+			Path: dbPath,
+		},
+		Auth: config.AuthConfig{
+			Enabled:      false,
+			CookieSecret: "test-secret",
+		},
+		DataDir:  "./default-data",
+		LogLevel: "info",
+	}
+
+	// Create app and call initDB
+	app := &App{
+		config: bootstrapCfg,
+		logger: slog.Default(),
+		db:     testDB,
+		queue:  queue.New(slog.Default()),
+		runner: runner.New(slog.Default()),
+	}
+
+	// Set up a minimal scheduler for initDB
+	app.scheduler = scheduler.New(slog.Default())
+	app.runner.SetQueue(app.queue)
+
+	if err := app.initDB(); err != nil {
+		t.Fatalf("initDB failed: %v", err)
+	}
+
+	// Verify persisted config was applied to active config
+	if app.config.Server.BasePath != "/custom-path" {
+		t.Errorf("expected BasePath '/custom-path', got: %q", app.config.Server.BasePath)
+	}
+	if app.config.DataDir != "/custom/data" {
+		t.Errorf("expected DataDir '/custom/data', got: %q", app.config.DataDir)
+	}
+	if app.config.LogLevel != "debug" {
+		t.Errorf("expected LogLevel 'debug', got: %q", app.config.LogLevel)
+	}
+
+	// Verify bootstrap-only fields are preserved
+	if app.config.Server.Host != "localhost" {
+		t.Errorf("expected Host 'localhost' to be preserved, got: %q", app.config.Server.Host)
+	}
+	if app.config.Server.Port != 9999 {
+		t.Errorf("expected Port 9999 to be preserved, got: %d", app.config.Server.Port)
+	}
+	if app.config.Database.Path != dbPath {
+		t.Errorf("expected Database.Path to be preserved, got: %q", app.config.Database.Path)
+	}
+}
+
+// TestInitDBInjectsDefaultsForEmptyRow tests that initDB injects defaults
+// when the configs row is empty.
+func TestInitDBInjectsDefaultsForEmptyRow(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := tmpDir + "/test.db"
+
+	testDB, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("failed to open test db: %v", err)
+	}
+	defer testDB.Close()
+
+	// Run migrations (this creates configs table with empty '{}' row)
+	if err := db.RunMigrations(testDB); err != nil {
+		t.Fatalf("RunMigrations failed: %v", err)
+	}
+
+	// Create bootstrap config with specific defaults
+	bootstrapCfg := &config.Config{
+		Server: config.ServerConfig{
+			Host:     "0.0.0.0",
+			Port:     8080,
+			BasePath: "/default",
+		},
+		Database: config.DatabaseConfig{
+			Path: dbPath,
+		},
+		Auth: config.AuthConfig{
+			Enabled:      false,
+			CookieSecret: "test-secret",
+		},
+		DataDir:  "./default-data",
+		LogLevel: "info",
+	}
+
+	// Create app and call initDB
+	app := &App{
+		config: bootstrapCfg,
+		logger: slog.Default(),
+		db:     testDB,
+		queue:  queue.New(slog.Default()),
+		runner: runner.New(slog.Default()),
+	}
+
+	// Set up a minimal scheduler for initDB
+	app.scheduler = scheduler.New(slog.Default())
+	app.runner.SetQueue(app.queue)
+
+	if err := app.initDB(); err != nil {
+		t.Fatalf("initDB failed: %v", err)
+	}
+
+	// Verify defaults were injected and applied
+	if app.config.Server.BasePath != "/default" {
+		t.Errorf("expected BasePath '/default', got: %q", app.config.Server.BasePath)
+	}
+	if app.config.DataDir != "./default-data" {
+		t.Errorf("expected DataDir './default-data', got: %q", app.config.DataDir)
+	}
+	if app.config.LogLevel != "info" {
+		t.Errorf("expected LogLevel 'info', got: %q", app.config.LogLevel)
+	}
+
+	// Verify the persisted config row was updated with defaults
+	var value string
+	err = testDB.QueryRow(`SELECT value FROM configs WHERE id = 1`).Scan(&value)
+	if err != nil {
+		t.Fatalf("query persisted config: %v", err)
+	}
+
+	var stored configs.PersistedConfig
+	if err := json.Unmarshal([]byte(value), &stored); err != nil {
+		t.Fatalf("unmarshal stored config: %v", err)
+	}
+	if stored.Server.BasePath != "/default" {
+		t.Errorf("expected stored BasePath '/default', got: %q", stored.Server.BasePath)
+	}
+	if stored.DataDir != "./default-data" {
+		t.Errorf("expected stored DataDir './default-data', got: %q", stored.DataDir)
+	}
+}
+
+// TestInitDBPreservesAuthBootstrapOnly tests that auth config is NOT loaded
+// from persisted config (it's bootstrap-only).
+func TestInitDBPreservesAuthBootstrapOnly(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := tmpDir + "/test.db"
+
+	testDB, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("failed to open test db: %v", err)
+	}
+	defer testDB.Close()
+
+	// Run migrations
+	if err := db.RunMigrations(testDB); err != nil {
+		t.Fatalf("RunMigrations failed: %v", err)
+	}
+
+	// Create bootstrap config
+	bootstrapCfg := &config.Config{
+		Server: config.ServerConfig{
+			Host:     "0.0.0.0",
+			Port:     8080,
+			BasePath: "/",
+		},
+		Database: config.DatabaseConfig{
+			Path: dbPath,
+		},
+		Auth: config.AuthConfig{
+			Enabled:      true,
+			Username:     "bootstrap-user",
+			Password:     "bootstrap-pass",
+			CookieSecret: "bootstrap-secret",
+		},
+		DataDir:  "./data",
+		LogLevel: "info",
+	}
+
+	// Create app and call initDB
+	app := &App{
+		config: bootstrapCfg,
+		logger: slog.Default(),
+		db:     testDB,
+		queue:  queue.New(slog.Default()),
+		runner: runner.New(slog.Default()),
+	}
+
+	// Set up a minimal scheduler for initDB
+	app.scheduler = scheduler.New(slog.Default())
+	app.runner.SetQueue(app.queue)
+
+	if err := app.initDB(); err != nil {
+		t.Fatalf("initDB failed: %v", err)
+	}
+
+	// Verify auth fields are preserved from bootstrap config, not from persisted config
+	if app.config.Auth.Username != "bootstrap-user" {
+		t.Errorf("expected Auth.Username 'bootstrap-user', got: %q", app.config.Auth.Username)
+	}
+	if app.config.Auth.Password != "bootstrap-pass" {
+		t.Errorf("expected Auth.Password 'bootstrap-pass', got: %q", app.config.Auth.Password)
+	}
+	if app.config.Auth.Enabled != true {
+		t.Errorf("expected Auth.Enabled true, got: %v", app.config.Auth.Enabled)
 	}
 }
