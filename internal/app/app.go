@@ -133,13 +133,13 @@ func (a *App) initDB() error {
 		return fmt.Errorf("failed to bootstrap persisted config: %w", err)
 	}
 	a.logger.Info("persisted config loaded",
-		"base_path", persistedCfg.Server.BasePath,
 		"data_dir", persistedCfg.DataDir,
 		"log_level", persistedCfg.LogLevel,
 	)
 
 	// Apply persisted config back to active config so runtime uses DB values.
-	a.config.ApplyPersistedConfig(persistedCfg.Server.BasePath, persistedCfg.DataDir, persistedCfg.LogLevel)
+	// Note: BasePath is NOT applied from persisted config - it is bootstrap-only.
+	a.config.ApplyPersistedConfig(persistedCfg.DataDir, persistedCfg.LogLevel)
 
 	// Rebuild logger with persisted log level, then rebuild dependent components.
 	a.logger = logger.New(persistedCfg.LogLevel)

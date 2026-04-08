@@ -1126,7 +1126,9 @@ Walens should support a configurable deployment base path.
 Rules:
 
 - default base path is `/`
-- user can configure another base path, for example `/walens`
+- user can configure another base path, for example `/walens` via `WALENS_BASE_PATH` environment variable
+- base path is **bootstrap-only** and must come from environment or command-line flags
+- base path is **NOT persisted** to the database - it cannot be changed at runtime
 - frontend asset serving, SPA fallback, login page, and API routes must all honor the configured base path
 - if base path is `/walens`, API routes become `/walens/api/...`
 - Vite dev mounting and production asset serving must both work correctly when base path is not `/`
@@ -1134,9 +1136,9 @@ Rules:
 - backend-rendered HTML shell must inject runtime config so frontend router and API client derive paths from runtime, not compile-time constants
 - production entry assets must be served under `{base}/assets/...` and split chunks must resolve relative to that entry asset location
 
-Recommended config:
+Bootstrap-only config:
 
-- `server.base_path`
+- `WALENS_BASE_PATH` (env var) - this is NOT stored in the persisted configs table
 
 Examples:
 
@@ -1534,6 +1536,7 @@ Semantics:
 - when the table is empty during boot, Walens should insert the default config immediately
 - application config should be managed from this table only, not through layered app-config sources
 - auth settings and similar bootstrap/runtime-only settings should stay outside this table
+- base path (`WALENS_BASE_PATH`) is intentionally excluded from persisted config - it is bootstrap-only and must come from environment variables
 
 Recommended operational rule:
 
@@ -1835,7 +1838,7 @@ Recommended bootstrap/runtime auth fields:
 
 Recommended bootstrap/runtime server path fields:
 
-- `WALENS_SERVER_BASE_PATH`
+- `WALENS_BASE_PATH` (bootstrap-only, NOT persisted)
 
 Examples:
 

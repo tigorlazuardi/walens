@@ -126,9 +126,6 @@ func TestLoadConfigSuccess(t *testing.T) {
 	}
 
 	persistedCfg := &PersistedConfig{
-		Server: PersistedServerConfig{
-			BasePath: "/walens",
-		},
 		DataDir:  "/data",
 		LogLevel: "debug",
 	}
@@ -144,9 +141,6 @@ func TestLoadConfigSuccess(t *testing.T) {
 		t.Fatalf("Load failed: %v", err)
 	}
 
-	if loaded.Server.BasePath != "/walens" {
-		t.Errorf("expected BasePath '/walens', got: %q", loaded.Server.BasePath)
-	}
 	if loaded.DataDir != "/data" {
 		t.Errorf("expected DataDir '/data', got: %q", loaded.DataDir)
 	}
@@ -172,9 +166,6 @@ func TestStoreConfigAtomicReplace(t *testing.T) {
 
 	// Insert initial config
 	initialCfg := &PersistedConfig{
-		Server: PersistedServerConfig{
-			BasePath: "/",
-		},
 		DataDir:  "/initial",
 		LogLevel: "info",
 	}
@@ -187,9 +178,6 @@ func TestStoreConfigAtomicReplace(t *testing.T) {
 	// Store new config
 	svc := NewService(db)
 	newCfg := &PersistedConfig{
-		Server: PersistedServerConfig{
-			BasePath: "/walens",
-		},
 		DataDir:  "/newdata",
 		LogLevel: "debug",
 	}
@@ -214,9 +202,6 @@ func TestStoreConfigAtomicReplace(t *testing.T) {
 		t.Fatalf("unmarshal stored config: %v", err)
 	}
 
-	if loaded.Server.BasePath != "/walens" {
-		t.Errorf("expected BasePath '/walens', got: %q", loaded.Server.BasePath)
-	}
 	if loaded.DataDir != "/newdata" {
 		t.Errorf("expected DataDir '/newdata', got: %q", loaded.DataDir)
 	}
@@ -242,9 +227,6 @@ func TestBootstrapDefaultInsertsWhenAbsent(t *testing.T) {
 
 	svc := NewService(db)
 	defaultCfg := &PersistedConfig{
-		Server: PersistedServerConfig{
-			BasePath: "/",
-		},
 		DataDir:  "/default/data",
 		LogLevel: "info",
 	}
@@ -291,9 +273,6 @@ func TestBootstrapDefaultReturnsExisting(t *testing.T) {
 
 	// Pre-populate with existing config
 	existingCfg := &PersistedConfig{
-		Server: PersistedServerConfig{
-			BasePath: "/existing",
-		},
 		DataDir:  "/existing/data",
 		LogLevel: "warn",
 	}
@@ -305,9 +284,6 @@ func TestBootstrapDefaultReturnsExisting(t *testing.T) {
 
 	svc := NewService(db)
 	defaultCfg := &PersistedConfig{
-		Server: PersistedServerConfig{
-			BasePath: "/",
-		},
 		DataDir:  "/default/data",
 		LogLevel: "info",
 	}
@@ -349,9 +325,6 @@ func TestBootstrapDefaultWithEmptyRow(t *testing.T) {
 
 	svc := NewService(db)
 	defaultCfg := &PersistedConfig{
-		Server: PersistedServerConfig{
-			BasePath: "/",
-		},
 		DataDir:  "/default/data",
 		LogLevel: "info",
 	}
@@ -370,9 +343,6 @@ func TestBootstrapDefaultWithEmptyRow(t *testing.T) {
 func TestDefaultPersistedConfig(t *testing.T) {
 	persistedCfg := DefaultPersistedConfig()
 
-	if persistedCfg.Server.BasePath != "/" {
-		t.Errorf("expected default BasePath '/', got: %q", persistedCfg.Server.BasePath)
-	}
 	if persistedCfg.DataDir != "./data" {
 		t.Errorf("expected default DataDir './data', got: %q", persistedCfg.DataDir)
 	}
@@ -398,9 +368,7 @@ func TestPersistedConfigApplyBootstrapConfig(t *testing.T) {
 	persistedCfg := DefaultPersistedConfig()
 	persistedCfg.ApplyBootstrapConfig(bootstrapCfg)
 
-	if persistedCfg.Server.BasePath != "/walens" {
-		t.Errorf("expected BasePath '/walens', got: %q", persistedCfg.Server.BasePath)
-	}
+	// BasePath is NOT applied from bootstrap config - it is bootstrap-only
 	if persistedCfg.DataDir != "/opt/walens/data" {
 		t.Errorf("expected DataDir '/opt/walens/data', got: %q", persistedCfg.DataDir)
 	}
@@ -411,9 +379,6 @@ func TestPersistedConfigApplyBootstrapConfig(t *testing.T) {
 
 func TestPersistedConfigJSONSerialization(t *testing.T) {
 	cfg := &PersistedConfig{
-		Server: PersistedServerConfig{
-			BasePath: "/custom",
-		},
 		DataDir:  "/custom/data",
 		LogLevel: "trace",
 	}
@@ -428,9 +393,6 @@ func TestPersistedConfigJSONSerialization(t *testing.T) {
 		t.Fatalf("unmarshal failed: %v", err)
 	}
 
-	if loaded.Server.BasePath != "/custom" {
-		t.Errorf("expected BasePath '/custom', got: %q", loaded.Server.BasePath)
-	}
 	if loaded.DataDir != "/custom/data" {
 		t.Errorf("expected DataDir '/custom/data', got: %q", loaded.DataDir)
 	}
@@ -455,7 +417,7 @@ func TestStoreConfigUpdatesTimestamp(t *testing.T) {
 	}
 
 	// Insert initial config with old timestamp
-	initialCfg := &PersistedConfig{Server: PersistedServerConfig{BasePath: "/"}}
+	initialCfg := &PersistedConfig{}
 	initialBytes, _ := json.Marshal(initialCfg)
 	_, err = db.Exec(`INSERT INTO configs (id, value, updated_at) VALUES (1, ?, 1000)`, string(initialBytes))
 	if err != nil {
@@ -463,7 +425,7 @@ func TestStoreConfigUpdatesTimestamp(t *testing.T) {
 	}
 
 	svc := NewService(db)
-	newCfg := &PersistedConfig{Server: PersistedServerConfig{BasePath: "/new"}}
+	newCfg := &PersistedConfig{}
 	if err := svc.Store(context.Background(), newCfg); err != nil {
 		t.Fatalf("Store failed: %v", err)
 	}
@@ -504,7 +466,6 @@ func TestConfigRepoWithFileDB(t *testing.T) {
 	// Simulate first boot: bootstrap defaults
 	svc := NewService(db)
 	defaultCfg := &PersistedConfig{
-		Server:   PersistedServerConfig{BasePath: "/"},
 		DataDir:  "./data",
 		LogLevel: "info",
 	}
@@ -526,7 +487,6 @@ func TestConfigRepoWithFileDB(t *testing.T) {
 
 	// Simulate config update
 	newCfg := &PersistedConfig{
-		Server:   PersistedServerConfig{BasePath: "/walens"},
 		DataDir:  "/new/data",
 		LogLevel: "debug",
 	}

@@ -28,23 +28,14 @@ func NewService(db *sql.DB) *Service {
 // to the database. Only fields that make sense to change at runtime are persisted.
 // Auth configuration and bootstrap-only fields are intentionally excluded.
 type PersistedConfig struct {
-	Server   PersistedServerConfig `json:"server"`
-	DataDir  string                `json:"data_dir"`
-	LogLevel string                `json:"log_level"`
-}
-
-// PersistedServerConfig contains server settings that are persisted.
-type PersistedServerConfig struct {
-	BasePath string `json:"base_path"`
+	DataDir  string `json:"data_dir"`
+	LogLevel string `json:"log_level"`
 }
 
 // DefaultPersistedConfig returns the built-in persisted config defaults.
-// Bootstrap config and later persisted DB values may override these defaults.
+// Bootstrap config values may overlay these defaults before any DB config is loaded.
 func DefaultPersistedConfig() *PersistedConfig {
 	return &PersistedConfig{
-		Server: PersistedServerConfig{
-			BasePath: "/",
-		},
 		DataDir:  "./data",
 		LogLevel: "info",
 	}
@@ -52,8 +43,9 @@ func DefaultPersistedConfig() *PersistedConfig {
 
 // ApplyBootstrapConfig overlays bootstrap/env-derived persisted fields on top of
 // the built-in defaults before any DB config is loaded.
+// Note: BasePath is NOT applied from bootstrap config because it is bootstrap-only
+// and must come from environment or command-line flags, not from persisted storage.
 func (c *PersistedConfig) ApplyBootstrapConfig(cfg *config.Config) {
-	c.Server.BasePath = cfg.Server.BasePath
 	c.DataDir = cfg.DataDir
 	c.LogLevel = cfg.LogLevel
 }

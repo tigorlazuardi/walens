@@ -46,11 +46,10 @@ func (c AuthConfig) Validate() error {
 }
 
 // ApplyPersistedConfig updates the runtime config with values from persisted storage.
-// Only persisted fields (basePath, dataDir, logLevel) are applied.
-// Bootstrap-only fields (Host, Port, Database.Path, Auth.*) are preserved from the
-// bootstrap config and are not overwritten by persisted values.
-func (c *Config) ApplyPersistedConfig(basePath, dataDir, logLevel string) {
-	c.Server.BasePath = basePath
+// Only persisted fields (dataDir, logLevel) are applied.
+// Bootstrap-only fields (Host, Port, BasePath, Database.Path, Auth.*) are preserved from
+// the bootstrap config and are not overwritten by persisted values.
+func (c *Config) ApplyPersistedConfig(dataDir, logLevel string) {
 	c.DataDir = dataDir
 	c.LogLevel = logLevel
 }

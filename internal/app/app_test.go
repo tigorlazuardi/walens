@@ -726,7 +726,8 @@ func TestBasePathRoutes(t *testing.T) {
 }
 
 // TestInitDBAppliesPersistedConfig tests that initDB loads persisted config and
-// applies it back to the active app config.
+// applies it back to the active app config. BasePath is NOT applied from persisted
+// config because it is bootstrap-only.
 func TestInitDBAppliesPersistedConfig(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := tmpDir + "/test.db"
@@ -742,11 +743,8 @@ func TestInitDBAppliesPersistedConfig(t *testing.T) {
 		t.Fatalf("RunMigrations failed: %v", err)
 	}
 
-	// Insert a custom persisted config
+	// Insert a custom persisted config (BasePath is ignored since it's bootstrap-only)
 	customCfg := &configs.PersistedConfig{
-		Server: configs.PersistedServerConfig{
-			BasePath: "/custom-path",
-		},
 		DataDir:  "/custom/data",
 		LogLevel: "debug",
 	}
@@ -792,8 +790,9 @@ func TestInitDBAppliesPersistedConfig(t *testing.T) {
 	}
 
 	// Verify persisted config was applied to active config
-	if app.config.Server.BasePath != "/custom-path" {
-		t.Errorf("expected BasePath '/custom-path', got: %q", app.config.Server.BasePath)
+	// BasePath remains from bootstrap config, NOT from persisted config
+	if app.config.Server.BasePath != "/" {
+		t.Errorf("expected BasePath '/' from bootstrap, got: %q", app.config.Server.BasePath)
 	}
 	if app.config.DataDir != "/custom/data" {
 		t.Errorf("expected DataDir '/custom/data', got: %q", app.config.DataDir)
@@ -888,9 +887,7 @@ func TestInitDBInjectsDefaultsForEmptyRow(t *testing.T) {
 	if err := json.Unmarshal([]byte(value), &stored); err != nil {
 		t.Fatalf("unmarshal stored config: %v", err)
 	}
-	if stored.Server.BasePath != "/default" {
-		t.Errorf("expected stored BasePath '/default', got: %q", stored.Server.BasePath)
-	}
+	// Note: BasePath is NOT stored in persisted config since it's bootstrap-only
 	if stored.DataDir != "./default-data" {
 		t.Errorf("expected stored DataDir './default-data', got: %q", stored.DataDir)
 	}
