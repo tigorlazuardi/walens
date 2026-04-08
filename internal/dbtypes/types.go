@@ -148,6 +148,10 @@ func (t *UnixMilliTime) Scan(src interface{}) error {
 		ms = int64(v)
 	case []byte:
 		fmt.Sscanf(string(v), "%d", &ms)
+	case string:
+		var err error
+		t.Time, err = time.Parse(time.RFC3339Nano, v)
+		return err
 	default:
 		return fmt.Errorf("cannot scan %T into UnixMilliTime", src)
 	}
