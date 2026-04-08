@@ -126,7 +126,8 @@ func (a *App) initDB() error {
 
 	// Load persisted config after migrations. If absent or empty, inject defaults.
 	configService := configs.NewService(a.db)
-	defaultPersistedCfg := configs.DefaultPersistedConfig(a.config)
+	defaultPersistedCfg := configs.DefaultPersistedConfig()
+	defaultPersistedCfg.ApplyBootstrapConfig(a.config)
 	persistedCfg, err := configService.BootstrapDefault(context.Background(), defaultPersistedCfg)
 	if err != nil {
 		return fmt.Errorf("failed to bootstrap persisted config: %w", err)

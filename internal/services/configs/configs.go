@@ -38,16 +38,24 @@ type PersistedServerConfig struct {
 	BasePath string `json:"base_path"`
 }
 
-// DefaultPersistedConfig returns the default persisted config derived from
-// the bootstrap runtime config. This is used when no persisted config exists.
-func DefaultPersistedConfig(cfg *config.Config) *PersistedConfig {
+// DefaultPersistedConfig returns the built-in persisted config defaults.
+// Bootstrap config and later persisted DB values may override these defaults.
+func DefaultPersistedConfig() *PersistedConfig {
 	return &PersistedConfig{
 		Server: PersistedServerConfig{
-			BasePath: cfg.Server.BasePath,
+			BasePath: "/",
 		},
-		DataDir:  cfg.DataDir,
-		LogLevel: cfg.LogLevel,
+		DataDir:  "./data",
+		LogLevel: "info",
 	}
+}
+
+// ApplyBootstrapConfig overlays bootstrap/env-derived persisted fields on top of
+// the built-in defaults before any DB config is loaded.
+func (c *PersistedConfig) ApplyBootstrapConfig(cfg *config.Config) {
+	c.Server.BasePath = cfg.Server.BasePath
+	c.DataDir = cfg.DataDir
+	c.LogLevel = cfg.LogLevel
 }
 
 // Load reads the persisted config from the database.

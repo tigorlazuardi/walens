@@ -367,7 +367,21 @@ func TestBootstrapDefaultWithEmptyRow(t *testing.T) {
 	}
 }
 
-func TestDefaultPersistedConfigFromBootstrap(t *testing.T) {
+func TestDefaultPersistedConfig(t *testing.T) {
+	persistedCfg := DefaultPersistedConfig()
+
+	if persistedCfg.Server.BasePath != "/" {
+		t.Errorf("expected default BasePath '/', got: %q", persistedCfg.Server.BasePath)
+	}
+	if persistedCfg.DataDir != "./data" {
+		t.Errorf("expected default DataDir './data', got: %q", persistedCfg.DataDir)
+	}
+	if persistedCfg.LogLevel != "info" {
+		t.Errorf("expected default LogLevel 'info', got: %q", persistedCfg.LogLevel)
+	}
+}
+
+func TestPersistedConfigApplyBootstrapConfig(t *testing.T) {
 	bootstrapCfg := &config.Config{
 		Server: config.ServerConfig{
 			Host:     "0.0.0.0",
@@ -381,7 +395,8 @@ func TestDefaultPersistedConfigFromBootstrap(t *testing.T) {
 		LogLevel: "debug",
 	}
 
-	persistedCfg := DefaultPersistedConfig(bootstrapCfg)
+	persistedCfg := DefaultPersistedConfig()
+	persistedCfg.ApplyBootstrapConfig(bootstrapCfg)
 
 	if persistedCfg.Server.BasePath != "/walens" {
 		t.Errorf("expected BasePath '/walens', got: %q", persistedCfg.Server.BasePath)
