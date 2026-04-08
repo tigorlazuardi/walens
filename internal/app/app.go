@@ -24,6 +24,7 @@ import (
 	"github.com/walens/walens/internal/runner"
 	"github.com/walens/walens/internal/scheduler"
 	"github.com/walens/walens/internal/services/configs"
+	sourcesvc "github.com/walens/walens/internal/services/sources"
 	"github.com/walens/walens/internal/sources"
 	"github.com/walens/walens/internal/sources/booru"
 	"github.com/walens/walens/internal/sources/reddit"
@@ -37,6 +38,7 @@ type App struct {
 	logger         *slog.Logger
 	db             *sql.DB
 	configService  *configs.Service
+	sourcesService *sourcesvc.Service
 	sourceRegistry *sources.Registry
 	server         *http.Server
 	scheduler      *scheduler.Scheduler
@@ -141,6 +143,10 @@ func (a *App) initDB() error {
 
 	// Load persisted config after migrations. If absent or empty, inject defaults.
 	a.configService = configs.NewService(a.db)
+
+	// Initialize sources service with db and registry
+	a.sourcesService = sourcesvc.NewService(a.db, a.sourceRegistry)
+
 	defaultPersistedCfg := configs.DefaultPersistedConfig()
 	defaultPersistedCfg.ApplyBootstrapConfig(a.config)
 	persistedCfg, err := a.configService.BootstrapDefault(context.Background(), defaultPersistedCfg)
@@ -188,6 +194,7 @@ func (a *App) buildHTTPHandler() http.Handler {
 	if a.sourceRegistry == nil {
 		a.sourceRegistry = newSourceRegistry()
 	}
+	a.sourcesService = sourcesvc.NewService(a.db, a.sourceRegistry)
 	humaConfig := huma.DefaultConfig("Walens API", "0.0.1")
 	humaConfig.OpenAPIPath = joinPath(basePath, "/openapi")
 	humaConfig.DocsPath = joinPath(basePath, "/docs")
@@ -328,6 +335,9 @@ func (a *App) registerHumaRoutes(api huma.API, basePath string, authConfig auth.
 
 	// Register source types RPC routes
 	routes.RegisterSourceTypesRoutes(api, basePath, a.sourceRegistry)
+
+	// Register sources RPC routes
+	routes.RegisterSourcesRoutes(api, basePath, a.sourcesService)
 }
 
 // startHTTPServer configures and starts the HTTP server with health endpoint.

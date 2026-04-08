@@ -18,6 +18,10 @@ import (
 	"github.com/walens/walens/internal/runner"
 	"github.com/walens/walens/internal/scheduler"
 	"github.com/walens/walens/internal/services/configs"
+	sourcesvc "github.com/walens/walens/internal/services/sources"
+	"github.com/walens/walens/internal/sources"
+	"github.com/walens/walens/internal/sources/booru"
+	"github.com/walens/walens/internal/sources/reddit"
 
 	_ "modernc.org/sqlite"
 )
@@ -1575,6 +1579,365 @@ func TestSourceTypesRoutesWithBasePath(t *testing.T) {
 		// Huma unwraps Body field
 		if resp["type_name"] != "booru" {
 			t.Errorf("expected type_name 'booru', got: %v", resp["type_name"])
+		}
+	})
+}
+
+// TestSourcesRoutes tests the sources CRUD API endpoints.
+func TestSourcesRoutes(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := tmpDir + "/test.db"
+
+	testDB, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("failed to open test db: %v", err)
+	}
+	defer testDB.Close()
+
+	// Run migrations
+	if err := db.RunMigrations(testDB); err != nil {
+		t.Fatalf("RunMigrations failed: %v", err)
+	}
+
+	cfg := &config.Config{
+		Server: config.ServerConfig{
+			Host:     "localhost",
+			Port:     0,
+			BasePath: "/",
+		},
+		Database: config.DatabaseConfig{
+			Path: dbPath,
+		},
+		Auth: config.AuthConfig{
+			Enabled:      false,
+			CookieSecret: testCookieSecret,
+		},
+		DataDir:  tmpDir,
+		LogLevel: "info",
+	}
+
+	app := &App{
+		config: cfg,
+		logger: slog.Default(),
+		db:     testDB,
+		queue:  queue.New(slog.Default()),
+		runner: runner.New(slog.Default()),
+	}
+
+	// Initialize services
+	app.configService = configs.NewService(app.db)
+	// Initialize sourceRegistry before sourcesService since sourcesService needs it
+	app.sourceRegistry = sources.NewRegistry()
+	app.sourceRegistry.Register(booru.New())
+	app.sourceRegistry.Register(reddit.New())
+	app.sourcesService = sourcesvc.NewService(app.db, app.sourceRegistry)
+
+	// Set up minimal scheduler
+	app.scheduler = scheduler.New(slog.Default())
+	app.runner.SetQueue(app.queue)
+
+	handler := app.Handler()
+
+	// Test ListSources - empty
+	t.Run("list sources returns empty list initially", func(t *testing.T) {
+		body := `{}`
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/sources/ListSources", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Errorf("expected status %d, got %d, body: %s", http.StatusOK, rec.Code, rec.Body.String())
+		}
+
+		var resp map[string]interface{}
+		if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("failed to unmarshal response: %v", err)
+		}
+
+		// Huma may return null for nil slices, which unmarshals as nil
+		// Handle both null and empty array cases
+		items, ok := resp["items"]
+		if !ok {
+			t.Fatalf("expected 'items' field in response, got: %v", resp)
+		}
+		if items == nil {
+			// items is null, which is semantically equivalent to empty for list operations
+			// This is a Huma behavior where nil slices serialize as null
+			items = []interface{}{}
+		}
+		itemsSlice, ok := items.([]interface{})
+		if !ok {
+			t.Fatalf("expected 'items' to be an array, got: %T", items)
+		}
+		if len(itemsSlice) != 0 {
+			t.Errorf("expected 0 items, got %d", len(itemsSlice))
+		}
+	})
+
+	// Test CreateSource
+	t.Run("create source", func(t *testing.T) {
+		body := `{"name":"test-source","source_type":"booru","params":{"tags":["nature"]},"lookup_count":50,"is_enabled":true}`
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/sources/CreateSource", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Errorf("expected status %d, got %d, body: %s", http.StatusOK, rec.Code, rec.Body.String())
+		}
+
+		var resp map[string]interface{}
+		if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("failed to unmarshal response: %v", err)
+		}
+
+		if resp["name"] != "test-source" {
+			t.Errorf("expected name 'test-source', got: %v", resp["name"])
+		}
+		if resp["source_type"] != "booru" {
+			t.Errorf("expected source_type 'booru', got: %v", resp["source_type"])
+		}
+		if resp["lookup_count"] != float64(50) {
+			t.Errorf("expected lookup_count 50, got: %v", resp["lookup_count"])
+		}
+		// ID should be present
+		if resp["id"] == nil || resp["id"] == "" {
+			t.Error("expected id to be set")
+		}
+	})
+
+	// Test CreateSource with invalid type
+	t.Run("create source with invalid type returns 400", func(t *testing.T) {
+		body := `{"name":"bad-source","source_type":"nonexistent","params":{},"lookup_count":50,"is_enabled":true}`
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/sources/CreateSource", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusBadRequest {
+			t.Errorf("expected status %d, got %d, body: %s", http.StatusBadRequest, rec.Code, rec.Body.String())
+		}
+	})
+
+	// Test CreateSource with duplicate name
+	t.Run("create source with duplicate name returns 409", func(t *testing.T) {
+		body := `{"name":"test-source","source_type":"booru","params":{"tags":["test"]},"lookup_count":50,"is_enabled":true}`
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/sources/CreateSource", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusConflict {
+			t.Errorf("expected status %d, got %d, body: %s", http.StatusConflict, rec.Code, rec.Body.String())
+		}
+	})
+
+	// Test ListSources - with data
+	t.Run("list sources returns created source", func(t *testing.T) {
+		body := `{}`
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/sources/ListSources", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Errorf("expected status %d, got %d, body: %s", http.StatusOK, rec.Code, rec.Body.String())
+		}
+
+		var resp map[string]interface{}
+		if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("failed to unmarshal response: %v", err)
+		}
+
+		items, ok := resp["items"].([]interface{})
+		if !ok {
+			t.Fatalf("expected 'items' field in response, got: %v", resp)
+		}
+		if len(items) != 1 {
+			t.Errorf("expected 1 item, got %d", len(items))
+		}
+	})
+}
+
+// TestSourcesRoutesWithAuth tests the sources API endpoints with auth enabled.
+func TestSourcesRoutesWithAuth(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := tmpDir + "/test.db"
+
+	testDB, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("failed to open test db: %v", err)
+	}
+	defer testDB.Close()
+
+	// Run migrations
+	if err := db.RunMigrations(testDB); err != nil {
+		t.Fatalf("RunMigrations failed: %v", err)
+	}
+
+	cfg := &config.Config{
+		Server: config.ServerConfig{
+			Host:     "localhost",
+			Port:     0,
+			BasePath: "/",
+		},
+		Database: config.DatabaseConfig{
+			Path: dbPath,
+		},
+		Auth: config.AuthConfig{
+			Enabled:      true,
+			Username:     "testuser",
+			Password:     "testpass",
+			CookieSecret: testCookieSecret,
+		},
+		DataDir:  tmpDir,
+		LogLevel: "info",
+	}
+
+	app := &App{
+		config: cfg,
+		logger: slog.Default(),
+		db:     testDB,
+		queue:  queue.New(slog.Default()),
+		runner: runner.New(slog.Default()),
+	}
+
+	// Initialize services
+	app.configService = configs.NewService(app.db)
+	app.sourcesService = sourcesvc.NewService(app.db, app.sourceRegistry)
+
+	// Set up minimal scheduler
+	app.scheduler = scheduler.New(slog.Default())
+	app.runner.SetQueue(app.queue)
+
+	handler := app.Handler()
+
+	// Test ListSources requires auth
+	t.Run("list sources requires auth", func(t *testing.T) {
+		body := `{}`
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/sources/ListSources", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusUnauthorized {
+			t.Errorf("expected status %d, got %d", http.StatusUnauthorized, rec.Code)
+		}
+	})
+
+	// Test ListSources with valid auth
+	t.Run("list sources with valid auth", func(t *testing.T) {
+		body := `{}`
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/sources/ListSources", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		creds := base64.StdEncoding.EncodeToString([]byte("testuser:testpass"))
+		req.Header.Set("Authorization", "Basic "+creds)
+
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Errorf("expected status %d, got %d, body: %s", http.StatusOK, rec.Code, rec.Body.String())
+		}
+	})
+}
+
+// TestSourcesRoutesWithBasePath tests sources routes with a non-root base path.
+func TestSourcesRoutesWithBasePath(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := tmpDir + "/test.db"
+
+	testDB, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("failed to open test db: %v", err)
+	}
+	defer testDB.Close()
+
+	// Run migrations
+	if err := db.RunMigrations(testDB); err != nil {
+		t.Fatalf("RunMigrations failed: %v", err)
+	}
+
+	cfg := &config.Config{
+		Server: config.ServerConfig{
+			Host:     "localhost",
+			Port:     0,
+			BasePath: "/walens",
+		},
+		Database: config.DatabaseConfig{
+			Path: dbPath,
+		},
+		Auth: config.AuthConfig{
+			Enabled:      false,
+			CookieSecret: testCookieSecret,
+		},
+		DataDir:  tmpDir,
+		LogLevel: "info",
+	}
+
+	app := &App{
+		config: cfg,
+		logger: slog.Default(),
+		db:     testDB,
+		queue:  queue.New(slog.Default()),
+		runner: runner.New(slog.Default()),
+	}
+
+	// Initialize services
+	app.configService = configs.NewService(app.db)
+	// Initialize sourceRegistry before sourcesService since sourcesService needs it
+	app.sourceRegistry = sources.NewRegistry()
+	app.sourceRegistry.Register(booru.New())
+	app.sourceRegistry.Register(reddit.New())
+	app.sourcesService = sourcesvc.NewService(app.db, app.sourceRegistry)
+
+	// Set up minimal scheduler
+	app.scheduler = scheduler.New(slog.Default())
+	app.runner.SetQueue(app.queue)
+
+	handler := app.Handler()
+
+	// Test ListSources at /walens/api/v1/sources/ListSources
+	t.Run("list sources with base path", func(t *testing.T) {
+		body := `{}`
+		req := httptest.NewRequest(http.MethodPost, "/walens/api/v1/sources/ListSources", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Errorf("expected status %d, got %d, body: %s", http.StatusOK, rec.Code, rec.Body.String())
+		}
+	})
+
+	// Test CreateSource at /walens/api/v1/sources/CreateSource
+	t.Run("create source with base path", func(t *testing.T) {
+		body := `{"name":"walens-source","source_type":"booru","params":{"tags":["test"]},"lookup_count":25,"is_enabled":false}`
+		req := httptest.NewRequest(http.MethodPost, "/walens/api/v1/sources/CreateSource", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Errorf("expected status %d, got %d, body: %s", http.StatusOK, rec.Code, rec.Body.String())
+		}
+
+		var resp map[string]interface{}
+		if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("failed to unmarshal response: %v", err)
+		}
+
+		if resp["name"] != "walens-source" {
+			t.Errorf("expected name 'walens-source', got: %v", resp["name"])
 		}
 	})
 }
