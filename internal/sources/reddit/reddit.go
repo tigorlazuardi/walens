@@ -5,13 +5,21 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"html"
 	"iter"
+	"net/http"
 	"net/url"
+	"path"
 	"strings"
 
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/walens/walens/internal/sources"
 )
+
+const redditPageLimit = 100
+
+var redditHTTPClient = http.DefaultClient
+var redditBaseURL = "https://www.reddit.com"
 
 // Source implements a template Reddit-based wallpaper source.
 type Source struct{}
@@ -109,11 +117,87 @@ func (s *Source) DefaultLookupCount() int {
 	return 300
 }
 
-// Fetch implements sources.Source with a placeholder iterator.
+// Fetch implements sources.Source with paginated Reddit JSON listing requests.
 func (s *Source) Fetch(ctx context.Context, req sources.FetchRequest) iter.Seq2[sources.ImageMetadata, error] {
 	return func(yield func(sources.ImageMetadata, error) bool) {
-		_ = ctx
-		_ = req
+		if err := ctx.Err(); err != nil {
+			yield(sources.ImageMetadata{}, err)
+			return
+		}
+
+		var params Params
+		if err := json.Unmarshal(req.Params, &params); err != nil {
+			yield(sources.ImageMetadata{}, fmt.Errorf("invalid params JSON: %w", err))
+			return
+		}
+		if err := s.ValidateParams(req.Params); err != nil {
+			yield(sources.ImageMetadata{}, err)
+			return
+		}
+
+		remaining := req.LookupCount
+		if remaining <= 0 {
+			remaining = s.DefaultLookupCount()
+		}
+
+		after := ""
+		for remaining > 0 {
+			pageSize := remaining
+			if pageSize > redditPageLimit {
+				pageSize = redditPageLimit
+			}
+
+			listingURL, err := BuildListingURL(params, pageSize, after)
+			if err != nil {
+				yield(sources.ImageMetadata{}, err)
+				return
+			}
+
+			listing, err := fetchListing(ctx, listingURL)
+			if err != nil {
+				yield(sources.ImageMetadata{}, err)
+				return
+			}
+
+			if len(listing.Data.Children) == 0 {
+				return
+			}
+
+			for _, child := range listing.Data.Children {
+				if err := ctx.Err(); err != nil {
+					yield(sources.ImageMetadata{}, err)
+					return
+				}
+
+				remaining--
+				if child.Data.IsGallery {
+					for _, metadata := range listingChildToAlbumMetadata(child.Data, params.AllowNSFW) {
+						if !yield(metadata, nil) {
+							return
+						}
+					}
+					if remaining == 0 {
+						return
+					}
+					continue
+				}
+
+				if metadata, ok := listingChildToMetadata(child.Data, params.AllowNSFW); ok {
+					if !yield(metadata, nil) {
+						return
+					}
+				}
+
+				if remaining == 0 {
+					return
+				}
+			}
+
+			after = listing.Data.After
+			if after == "" {
+				return
+			}
+		}
 	}
 }
 
@@ -125,8 +209,8 @@ func (s *Source) BuildUniqueID(item sources.ImageMetadata) (string, error) {
 	return fmt.Sprintf("reddit:%s", item.SourceItemID), nil
 }
 
-// BuildListingURL constructs a Reddit JSON listing URL for future fetch implementation.
-func BuildListingURL(params Params, limit int) (string, error) {
+// BuildListingURL constructs a Reddit JSON listing URL.
+func BuildListingURL(params Params, limit int, after string) (string, error) {
 	target, targetType, err := normalizeTarget(params.Target)
 	if err != nil {
 		return "", err
@@ -137,11 +221,11 @@ func BuildListingURL(params Params, limit int) (string, error) {
 		sortOrder = "hot"
 	}
 
-	baseURL := &url.URL{
-		Scheme: "https",
-		Host:   "www.reddit.com",
-		Path:   buildTargetPath(targetType, target, sortOrder),
+	baseURL, err := url.Parse(redditBaseURL)
+	if err != nil {
+		return "", fmt.Errorf("parse reddit base URL: %w", err)
 	}
+	baseURL.Path = path.Join(baseURL.Path, buildTargetPath(targetType, target, sortOrder))
 
 	q := baseURL.Query()
 	q.Set("limit", fmt.Sprintf("%d", limit))
@@ -156,9 +240,248 @@ func BuildListingURL(params Params, limit int) (string, error) {
 	if params.TimeRange != "" {
 		q.Set("t", params.TimeRange)
 	}
+	if after != "" {
+		q.Set("after", after)
+	}
 
 	baseURL.RawQuery = q.Encode()
 	return baseURL.String(), nil
+}
+
+type redditListing struct {
+	Data struct {
+		After    string               `json:"after"`
+		Children []redditListingChild `json:"children"`
+	} `json:"data"`
+}
+
+type redditListingChild struct {
+	Data redditPost `json:"data"`
+}
+
+type redditPost struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Author      string `json:"author"`
+	Title       string `json:"title"`
+	Permalink   string `json:"permalink"`
+	URL         string `json:"url"`
+	Thumbnail   string `json:"thumbnail"`
+	PostHint    string `json:"post_hint"`
+	IsSelf      bool   `json:"is_self"`
+	IsVideo     bool   `json:"is_video"`
+	Media       any    `json:"media"`
+	Over18      bool   `json:"over_18"`
+	IsGallery   bool   `json:"is_gallery"`
+	GalleryData struct {
+		Items []struct {
+			MediaID string `json:"media_id"`
+		} `json:"items"`
+	} `json:"gallery_data"`
+	MediaMetadata map[string]struct {
+		Status string `json:"status"`
+		Mime   string `json:"m"`
+		S      struct {
+			U string `json:"u"`
+			X int    `json:"x"`
+			Y int    `json:"y"`
+		} `json:"s"`
+	} `json:"media_metadata"`
+	Preview struct {
+		Images []struct {
+			Source struct {
+				URL    string `json:"url"`
+				Width  int    `json:"width"`
+				Height int    `json:"height"`
+			} `json:"source"`
+		} `json:"images"`
+	} `json:"preview"`
+}
+
+func fetchListing(ctx context.Context, listingURL string) (*redditListing, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, listingURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+	req.Header.Set("User-Agent", "walens/0.1 (+https://github.com/tigorlazuardi/walens)")
+
+	resp, err := redditHTTPClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("fetch reddit listing: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("reddit listing request failed with status %d", resp.StatusCode)
+	}
+
+	var listing redditListing
+	if err := json.NewDecoder(resp.Body).Decode(&listing); err != nil {
+		return nil, fmt.Errorf("decode reddit listing: %w", err)
+	}
+	return &listing, nil
+}
+
+func listingChildToMetadata(post redditPost, allowNSFW bool) (sources.ImageMetadata, bool) {
+	if post.Over18 && !allowNSFW {
+		return sources.ImageMetadata{}, false
+	}
+
+	originURL := decodeRedditURL(post.URL)
+	previewURL := decodeRedditURL(post.Thumbnail)
+	width := 0
+	height := 0
+
+	if len(post.Preview.Images) > 0 {
+		source := post.Preview.Images[0].Source
+		if source.URL != "" {
+			originURL = decodeRedditURL(source.URL)
+			width = source.Width
+			height = source.Height
+		}
+		if previewURL == "" {
+			previewURL = decodeRedditURL(source.URL)
+		}
+	}
+
+	if !isLikelyImagePost(post, originURL) {
+		return sources.ImageMetadata{}, false
+	}
+
+	mimeType := detectImageMimeType(originURL)
+	if mimeType == "" {
+		return sources.ImageMetadata{}, false
+	}
+
+	itemID := firstNonEmpty(post.Name, post.ID)
+	if itemID == "" {
+		return sources.ImageMetadata{}, false
+	}
+
+	aspectRatio := 0.0
+	if width > 0 && height > 0 {
+		aspectRatio = float64(width) / float64(height)
+	}
+
+	tags := make([]string, 0, 1)
+	if post.Title != "" {
+		tags = append(tags, post.Title)
+	}
+
+	return sources.ImageMetadata{
+		PreviewURL:   previewURL,
+		OriginURL:    originURL,
+		SourceItemID: itemID,
+		OriginalID:   post.ID,
+		Uploader:     post.Author,
+		MimeType:     mimeType,
+		Width:        width,
+		Height:       height,
+		AspectRatio:  aspectRatio,
+		IsAdult:      post.Over18,
+		Tags:         tags,
+	}, true
+}
+
+func listingChildToAlbumMetadata(post redditPost, allowNSFW bool) []sources.ImageMetadata {
+	if post.Over18 && !allowNSFW {
+		return nil
+	}
+
+	results := make([]sources.ImageMetadata, 0, len(post.GalleryData.Items))
+	parentID := firstNonEmpty(post.Name, post.ID)
+	for _, galleryItem := range post.GalleryData.Items {
+		media, ok := post.MediaMetadata[galleryItem.MediaID]
+		if !ok || media.Status != "valid" {
+			continue
+		}
+
+		originURL := decodeRedditURL(media.S.U)
+		mimeType := media.Mime
+		if mimeType == "" {
+			mimeType = detectImageMimeType(originURL)
+		}
+		if !strings.HasPrefix(mimeType, "image/") {
+			continue
+		}
+
+		aspectRatio := 0.0
+		if media.S.X > 0 && media.S.Y > 0 {
+			aspectRatio = float64(media.S.X) / float64(media.S.Y)
+		}
+
+		results = append(results, sources.ImageMetadata{
+			PreviewURL:   originURL,
+			OriginURL:    originURL,
+			SourceItemID: parentID + ":" + galleryItem.MediaID,
+			OriginalID:   galleryItem.MediaID,
+			Uploader:     post.Author,
+			MimeType:     mimeType,
+			Width:        media.S.X,
+			Height:       media.S.Y,
+			AspectRatio:  aspectRatio,
+			IsAdult:      post.Over18,
+			Tags:         []string{post.Title},
+		})
+	}
+
+	return results
+}
+
+func decodeRedditURL(raw string) string {
+	decoded := html.UnescapeString(strings.TrimSpace(raw))
+	if decoded == "" || decoded == "self" || decoded == "default" || decoded == "nsfw" || decoded == "spoiler" {
+		return ""
+	}
+	return decoded
+}
+
+func isLikelyImagePost(post redditPost, rawURL string) bool {
+	if post.IsGallery {
+		return false
+	}
+	if post.IsSelf || post.IsVideo {
+		return false
+	}
+	switch post.PostHint {
+	case "hosted:video", "rich:video", "link":
+		// handled below only when URL itself is a direct image
+	case "self":
+		return false
+	}
+	if post.PostHint == "image" {
+		return true
+	}
+	return detectImageMimeType(rawURL) != ""
+}
+
+func detectImageMimeType(rawURL string) string {
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return ""
+	}
+	ext := strings.ToLower(path.Ext(parsed.Path))
+	switch ext {
+	case ".jpg", ".jpeg":
+		return "image/jpeg"
+	case ".png":
+		return "image/png"
+	case ".webp":
+		return "image/webp"
+	case ".gif":
+		return "image/gif"
+	default:
+		return ""
+	}
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 type redditTargetType string
