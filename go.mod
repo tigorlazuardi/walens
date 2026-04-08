@@ -7,6 +7,7 @@ require (
 	github.com/go-jet/jet/v2 v2.14.1
 	github.com/google/uuid v1.6.0
 	github.com/pressly/goose/v3 v3.27.0
+	github.com/robfig/cron/v3 v3.0.1
 	modernc.org/sqlite v1.46.1
 )
 

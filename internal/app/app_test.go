@@ -1941,3 +1941,448 @@ func TestSourcesRoutesWithBasePath(t *testing.T) {
 		}
 	})
 }
+
+// TestSourceSchedulesRoutes tests the source_schedules CRUD API endpoints.
+func TestSourceSchedulesRoutes(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := tmpDir + "/test.db"
+
+	testDB, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("failed to open test db: %v", err)
+	}
+	defer testDB.Close()
+
+	// Run migrations
+	if err := db.RunMigrations(testDB); err != nil {
+		t.Fatalf("RunMigrations failed: %v", err)
+	}
+
+	cfg := &config.Config{
+		Server: config.ServerConfig{
+			Host:     "localhost",
+			Port:     0,
+			BasePath: "/",
+		},
+		Database: config.DatabaseConfig{
+			Path: dbPath,
+		},
+		Auth: config.AuthConfig{
+			Enabled:      false,
+			CookieSecret: testCookieSecret,
+		},
+		DataDir:  tmpDir,
+		LogLevel: "info",
+	}
+
+	app := &App{
+		config: cfg,
+		logger: slog.Default(),
+		db:     testDB,
+		queue:  queue.New(slog.Default()),
+		runner: runner.New(slog.Default()),
+	}
+
+	// Initialize services
+	app.configService = configs.NewService(app.db)
+	app.sourceRegistry = sources.NewRegistry()
+	app.sourceRegistry.Register(booru.New())
+	app.sourceRegistry.Register(reddit.New())
+	app.sourcesService = sourcesvc.NewService(app.db, app.sourceRegistry)
+	app.scheduler = scheduler.New(slog.Default())
+	app.runner.SetQueue(app.queue)
+
+	handler := app.Handler()
+
+	// Helper to create a source first
+	createSource := func(t *testing.T, name string) string {
+		body := `{"name":"` + name + `","source_type":"booru","params":{"tags":["test"]},"lookup_count":25,"is_enabled":true}`
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/sources/CreateSource", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("create source failed: %d %s", rec.Code, rec.Body.String())
+		}
+		var resp map[string]interface{}
+		json.Unmarshal(rec.Body.Bytes(), &resp)
+		return resp["id"].(string)
+	}
+
+	// Test ListSourceSchedules - empty initially
+	t.Run("list source_schedules returns empty list initially", func(t *testing.T) {
+		body := `{}`
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/source_schedules/ListSourceSchedules", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Errorf("expected status %d, got %d, body: %s", http.StatusOK, rec.Code, rec.Body.String())
+		}
+
+		var resp map[string]interface{}
+		json.Unmarshal(rec.Body.Bytes(), &resp)
+		items, ok := resp["items"].([]interface{})
+		if !ok {
+			t.Fatalf("expected 'items' field in response, got: %v", resp)
+		}
+		if len(items) != 0 {
+			t.Errorf("expected 0 items, got %d", len(items))
+		}
+	})
+
+	// Create a source to reference
+	sourceID := createSource(t, "test-source-for-schedules")
+
+	// Test CreateSourceSchedule
+	t.Run("create source_schedule", func(t *testing.T) {
+		body := `{"source_id":"` + sourceID + `","cron_expr":"0 * * * *","is_enabled":true}`
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/source_schedules/CreateSourceSchedule", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Errorf("expected status %d, got %d, body: %s", http.StatusOK, rec.Code, rec.Body.String())
+		}
+
+		var resp map[string]interface{}
+		json.Unmarshal(rec.Body.Bytes(), &resp)
+		schedule := resp["schedule"].(map[string]interface{})
+		if schedule["cron_expr"] != "0 * * * *" {
+			t.Errorf("expected cron_expr '0 * * * *', got: %v", schedule["cron_expr"])
+		}
+		if schedule["source_id"] != sourceID {
+			t.Errorf("expected source_id %s, got: %v", sourceID, schedule["source_id"])
+		}
+	})
+
+	// Test CreateSourceSchedule with invalid cron
+	t.Run("create source_schedule with invalid cron returns 400", func(t *testing.T) {
+		body := `{"source_id":"` + sourceID + `","cron_expr":"invalid","is_enabled":true}`
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/source_schedules/CreateSourceSchedule", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusBadRequest {
+			t.Errorf("expected status %d, got %d, body: %s", http.StatusBadRequest, rec.Code, rec.Body.String())
+		}
+	})
+
+	// Test CreateSourceSchedule with non-existent source
+	t.Run("create source_schedule with non-existent source returns 400", func(t *testing.T) {
+		body := `{"source_id":"01800000-0000-0000-0000-000000000099","cron_expr":"0 * * * *","is_enabled":true}`
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/source_schedules/CreateSourceSchedule", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusBadRequest {
+			t.Errorf("expected status %d, got %d, body: %s", http.StatusBadRequest, rec.Code, rec.Body.String())
+		}
+	})
+
+	// Test ListSourceSchedules - with data
+	t.Run("list source_schedules returns created schedule", func(t *testing.T) {
+		body := `{}`
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/source_schedules/ListSourceSchedules", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Errorf("expected status %d, got %d, body: %s", http.StatusOK, rec.Code, rec.Body.String())
+		}
+
+		var resp map[string]interface{}
+		json.Unmarshal(rec.Body.Bytes(), &resp)
+		items := resp["items"].([]interface{})
+		if len(items) != 1 {
+			t.Errorf("expected 1 item, got %d", len(items))
+		}
+	})
+
+	// Get the schedule ID from the list
+	getScheduleID := func() string {
+		body := `{}`
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/source_schedules/ListSourceSchedules", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		var resp map[string]interface{}
+		json.Unmarshal(rec.Body.Bytes(), &resp)
+		items := resp["items"].([]interface{})
+		return items[0].(map[string]interface{})["id"].(string)
+	}
+
+	// Test GetSourceSchedule
+	t.Run("get source_schedule", func(t *testing.T) {
+		schedID := getScheduleID()
+		body := `{"id":"` + schedID + `"}`
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/source_schedules/GetSourceSchedule", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Errorf("expected status %d, got %d, body: %s", http.StatusOK, rec.Code, rec.Body.String())
+		}
+
+		var resp map[string]interface{}
+		json.Unmarshal(rec.Body.Bytes(), &resp)
+		if resp["id"] != schedID {
+			t.Errorf("expected id %s, got: %v", schedID, resp["id"])
+		}
+	})
+
+	// Test UpdateSourceSchedule
+	t.Run("update source_schedule", func(t *testing.T) {
+		schedID := getScheduleID()
+		body := `{"id":"` + schedID + `","source_id":"` + sourceID + `","cron_expr":"*/5 * * * *","is_enabled":false}`
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/source_schedules/UpdateSourceSchedule", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Errorf("expected status %d, got %d, body: %s", http.StatusOK, rec.Code, rec.Body.String())
+		}
+
+		var resp map[string]interface{}
+		json.Unmarshal(rec.Body.Bytes(), &resp)
+		schedule := resp["schedule"].(map[string]interface{})
+		if schedule["cron_expr"] != "*/5 * * * *" {
+			t.Errorf("expected cron_expr '*/5 * * * *', got: %v", schedule["cron_expr"])
+		}
+		if schedule["is_enabled"] != false {
+			t.Errorf("expected is_enabled false, got: %v", schedule["is_enabled"])
+		}
+	})
+
+	// Test DeleteSourceSchedule
+	t.Run("delete source_schedule", func(t *testing.T) {
+		schedID := getScheduleID()
+		body := `{"id":"` + schedID + `"}`
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/source_schedules/DeleteSourceSchedule", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusNoContent {
+			t.Errorf("expected status %d, got %d, body: %s", http.StatusNoContent, rec.Code, rec.Body.String())
+		}
+		if rec.Body.Len() != 0 {
+			t.Errorf("expected empty body, got: %s", rec.Body.String())
+		}
+
+		// Verify deleted
+		getReq := httptest.NewRequest(http.MethodPost, "/api/v1/source_schedules/GetSourceSchedule", strings.NewReader(body))
+		getReq.Header.Set("Content-Type", "application/json")
+		getRec := httptest.NewRecorder()
+		handler.ServeHTTP(getRec, getReq)
+		if getRec.Code != http.StatusNotFound {
+			t.Errorf("expected 404 after delete, got %d", getRec.Code)
+		}
+	})
+}
+
+// TestSourceSchedulesRoutesWithAuth tests source_schedules endpoints with auth enabled.
+func TestSourceSchedulesRoutesWithAuth(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := tmpDir + "/test.db"
+
+	testDB, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("failed to open test db: %v", err)
+	}
+	defer testDB.Close()
+
+	if err := db.RunMigrations(testDB); err != nil {
+		t.Fatalf("RunMigrations failed: %v", err)
+	}
+
+	cfg := &config.Config{
+		Server: config.ServerConfig{
+			Host:     "localhost",
+			Port:     0,
+			BasePath: "/",
+		},
+		Database: config.DatabaseConfig{
+			Path: dbPath,
+		},
+		Auth: config.AuthConfig{
+			Enabled:      true,
+			Username:     "testuser",
+			Password:     "testpass",
+			CookieSecret: testCookieSecret,
+		},
+		DataDir:  tmpDir,
+		LogLevel: "info",
+	}
+
+	app := &App{
+		config: cfg,
+		logger: slog.Default(),
+		db:     testDB,
+		queue:  queue.New(slog.Default()),
+		runner: runner.New(slog.Default()),
+	}
+
+	app.configService = configs.NewService(app.db)
+	app.sourceRegistry = sources.NewRegistry()
+	app.sourceRegistry.Register(booru.New())
+	app.sourcesService = sourcesvc.NewService(app.db, app.sourceRegistry)
+	app.scheduler = scheduler.New(slog.Default())
+	app.runner.SetQueue(app.queue)
+
+	handler := app.Handler()
+
+	// Test ListSourceSchedules requires auth
+	t.Run("list source_schedules requires auth", func(t *testing.T) {
+		body := `{}`
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/source_schedules/ListSourceSchedules", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusUnauthorized {
+			t.Errorf("expected status %d, got %d", http.StatusUnauthorized, rec.Code)
+		}
+	})
+
+	// Test ListSourceSchedules with valid auth
+	t.Run("list source_schedules with valid auth", func(t *testing.T) {
+		body := `{}`
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/source_schedules/ListSourceSchedules", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		creds := base64.StdEncoding.EncodeToString([]byte("testuser:testpass"))
+		req.Header.Set("Authorization", "Basic "+creds)
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Errorf("expected status %d, got %d, body: %s", http.StatusOK, rec.Code, rec.Body.String())
+		}
+	})
+}
+
+// TestSourceSchedulesRoutesWithBasePath tests source_schedules routes with a non-root base path.
+func TestSourceSchedulesRoutesWithBasePath(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := tmpDir + "/test.db"
+
+	testDB, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("failed to open test db: %v", err)
+	}
+	defer testDB.Close()
+
+	if err := db.RunMigrations(testDB); err != nil {
+		t.Fatalf("RunMigrations failed: %v", err)
+	}
+
+	cfg := &config.Config{
+		Server: config.ServerConfig{
+			Host:     "localhost",
+			Port:     0,
+			BasePath: "/walens",
+		},
+		Database: config.DatabaseConfig{
+			Path: dbPath,
+		},
+		Auth: config.AuthConfig{
+			Enabled:      false,
+			CookieSecret: testCookieSecret,
+		},
+		DataDir:  tmpDir,
+		LogLevel: "info",
+	}
+
+	app := &App{
+		config: cfg,
+		logger: slog.Default(),
+		db:     testDB,
+		queue:  queue.New(slog.Default()),
+		runner: runner.New(slog.Default()),
+	}
+
+	app.configService = configs.NewService(app.db)
+	app.sourceRegistry = sources.NewRegistry()
+	app.sourceRegistry.Register(booru.New())
+	app.sourceRegistry.Register(reddit.New())
+	app.sourcesService = sourcesvc.NewService(app.db, app.sourceRegistry)
+	app.scheduler = scheduler.New(slog.Default())
+	app.runner.SetQueue(app.queue)
+
+	handler := app.Handler()
+
+	// Create a source first
+	createSource := func(t *testing.T, name string) string {
+		body := `{"name":"` + name + `","source_type":"booru","params":{"tags":["test"]},"lookup_count":25,"is_enabled":true}`
+		req := httptest.NewRequest(http.MethodPost, "/walens/api/v1/sources/CreateSource", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		var resp map[string]interface{}
+		json.Unmarshal(rec.Body.Bytes(), &resp)
+		return resp["id"].(string)
+	}
+
+	t.Run("list source_schedules with base path", func(t *testing.T) {
+		body := `{}`
+		req := httptest.NewRequest(http.MethodPost, "/walens/api/v1/source_schedules/ListSourceSchedules", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Errorf("expected status %d, got %d, body: %s", http.StatusOK, rec.Code, rec.Body.String())
+		}
+	})
+
+	t.Run("create source_schedule with base path", func(t *testing.T) {
+		sourceID := createSource(t, "walens-test-source")
+		body := `{"source_id":"` + sourceID + `","cron_expr":"0 * * * *","is_enabled":true}`
+		req := httptest.NewRequest(http.MethodPost, "/walens/api/v1/source_schedules/CreateSourceSchedule", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Errorf("expected status %d, got %d, body: %s", http.StatusOK, rec.Code, rec.Body.String())
+		}
+
+		var resp map[string]interface{}
+		json.Unmarshal(rec.Body.Bytes(), &resp)
+		schedule := resp["schedule"].(map[string]interface{})
+		if schedule["cron_expr"] != "0 * * * *" {
+			t.Errorf("expected cron_expr '0 * * * *', got: %v", schedule["cron_expr"])
+		}
+	})
+
+	t.Run("create source_schedule with invalid cron at base path", func(t *testing.T) {
+		sourceID := createSource(t, "walens-test-source-2")
+		body := `{"source_id":"` + sourceID + `","cron_expr":"not-valid","is_enabled":true}`
+		req := httptest.NewRequest(http.MethodPost, "/walens/api/v1/source_schedules/CreateSourceSchedule", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusBadRequest {
+			t.Errorf("expected status %d, got %d, body: %s", http.StatusBadRequest, rec.Code, rec.Body.String())
+		}
+	})
+}
+
+// TestSchedulerReloadOnMutations tests that scheduler.Reload is called after create/update/delete.
+// Note: This test uses the actual scheduler and verifies the service-level behavior.
+// Route-level tests for auth and base path are covered by other tests.
+func TestSchedulerReloadOnMutations(t *testing.T) {
+	// This functionality is tested at the service level in source_schedules_test.go
+	// via the mockScheduler. At the app/route level, we rely on the service tests
+	// to verify Reload is called, and verify routes work correctly here.
+	// This test is a placeholder to document the testing approach.
+	t.Skip("Scheduler reload tested at service level via mockScheduler in source_schedules_test.go")
+}

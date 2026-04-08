@@ -2,12 +2,16 @@ package routes
 
 import (
 	"context"
+	"database/sql"
 
 	"github.com/danielgtaylor/huma/v2"
 	configsroutes "github.com/walens/walens/internal/routes/configs"
+	schedulesroutes "github.com/walens/walens/internal/routes/source_schedules"
 	sourcetypesroutes "github.com/walens/walens/internal/routes/source_types"
 	sourceroutes "github.com/walens/walens/internal/routes/sources"
+	"github.com/walens/walens/internal/scheduler"
 	configssvc "github.com/walens/walens/internal/services/configs"
+	schedulessvc "github.com/walens/walens/internal/services/source_schedules"
 	sourcetypessvc "github.com/walens/walens/internal/services/source_types"
 	sourcessvc "github.com/walens/walens/internal/services/sources"
 	"github.com/walens/walens/internal/sources"
@@ -63,7 +67,37 @@ func RegisterSourcesRoutes(api huma.API, basePath string, dbSourcesService *sour
 		return sourceroutes.UpdateSource(ctx, input, dbSourcesService)
 	})
 
-	huma.Register(api, sourceroutes.DeleteSourceOperation(basePath), func(ctx context.Context, input *sourceroutes.DeleteSourceInput) (*sourceroutes.DeleteSourceOutput, error) {
+	huma.Register(api, sourceroutes.DeleteSourceOperation(basePath), func(ctx context.Context, input *sourceroutes.DeleteSourceInput) (*struct{}, error) {
 		return sourceroutes.DeleteSource(ctx, input, dbSourcesService)
+	})
+}
+
+// RegisterSourceSchedulesRoutes registers all source_schedules RPC routes under /api/v1/source_schedules/.
+func RegisterSourceSchedulesRoutes(api huma.API, basePath string, db *sql.DB, sc *scheduler.Scheduler) {
+	var schedService *schedulessvc.Service
+	if db != nil {
+		schedService = schedulessvc.NewService(db, sc)
+	} else {
+		schedService = schedulessvc.NewService(nil, nil)
+	}
+
+	huma.Register(api, schedulesroutes.ListSourceSchedulesOperation(basePath), func(ctx context.Context, input *schedulesroutes.ListSourceSchedulesInput) (*schedulesroutes.ListSourceSchedulesOutput, error) {
+		return schedulesroutes.ListSourceSchedules(ctx, input, schedService)
+	})
+
+	huma.Register(api, schedulesroutes.GetSourceScheduleOperation(basePath), func(ctx context.Context, input *schedulesroutes.GetSourceScheduleInput) (*schedulesroutes.GetSourceScheduleOutput, error) {
+		return schedulesroutes.GetSourceSchedule(ctx, input, schedService)
+	})
+
+	huma.Register(api, schedulesroutes.CreateSourceScheduleOperation(basePath), func(ctx context.Context, input *schedulesroutes.CreateSourceScheduleInput) (*schedulesroutes.CreateSourceScheduleOutput, error) {
+		return schedulesroutes.CreateSourceSchedule(ctx, input, schedService)
+	})
+
+	huma.Register(api, schedulesroutes.UpdateSourceScheduleOperation(basePath), func(ctx context.Context, input *schedulesroutes.UpdateSourceScheduleInput) (*schedulesroutes.UpdateSourceScheduleOutput, error) {
+		return schedulesroutes.UpdateSourceSchedule(ctx, input, schedService)
+	})
+
+	huma.Register(api, schedulesroutes.DeleteSourceScheduleOperation(basePath), func(ctx context.Context, input *schedulesroutes.DeleteSourceScheduleInput) (*struct{}, error) {
+		return schedulesroutes.DeleteSourceSchedule(ctx, input, schedService)
 	})
 }

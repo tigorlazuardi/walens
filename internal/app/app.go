@@ -338,6 +338,9 @@ func (a *App) registerHumaRoutes(api huma.API, basePath string, authConfig auth.
 
 	// Register sources RPC routes
 	routes.RegisterSourcesRoutes(api, basePath, a.sourcesService)
+
+	// Register source_schedules RPC routes
+	routes.RegisterSourceSchedulesRoutes(api, basePath, a.db, a.scheduler)
 }
 
 // startHTTPServer configures and starts the HTTP server with health endpoint.

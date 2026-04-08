@@ -13,12 +13,13 @@ import (
 // DeleteSourceOperation returns the Huma operation metadata for DeleteSource.
 func DeleteSourceOperation(basePath string) huma.Operation {
 	return huma.Operation{
-		OperationID: "post-sources-delete-source",
-		Method:      "POST",
-		Path:        path.Join(basePath, "/api/v1/sources/DeleteSource"),
-		Summary:     "Delete a source by ID",
-		Description: "Deletes a configured source row by its ID. This also cascades to delete associated source_schedules and device_source_subscriptions.",
-		Tags:        []string{"sources"},
+		OperationID:   "post-sources-delete-source",
+		Method:        "POST",
+		Path:          path.Join(basePath, "/api/v1/sources/DeleteSource"),
+		DefaultStatus: 204,
+		Summary:       "Delete a source by ID",
+		Description:   "Deletes a configured source row by its ID. This also cascades to delete associated source_schedules and device_source_subscriptions.",
+		Tags:          []string{"sources"},
 	}
 }
 
@@ -29,14 +30,9 @@ type DeleteSourceInput struct {
 	}
 }
 
-// DeleteSourceOutput describes the response body for DeleteSource.
-type DeleteSourceOutput struct {
-	Body struct{}
-}
-
 // DeleteSource handles POST /api/v1/sources/DeleteSource.
 // Deletes a configured source row by ID.
-func DeleteSource(ctx context.Context, input *DeleteSourceInput, svc *sourcesvc.Service) (*DeleteSourceOutput, error) {
+func DeleteSource(ctx context.Context, input *DeleteSourceInput, svc *sourcesvc.Service) (*struct{}, error) {
 	id, err := dbtypes.NewUUIDFromString(input.Body.ID)
 	if err != nil {
 		return nil, huma.Error400BadRequest("invalid source ID format", err)
@@ -53,7 +49,5 @@ func DeleteSource(ctx context.Context, input *DeleteSourceInput, svc *sourcesvc.
 		return nil, huma.Error500InternalServerError("failed to delete source", err)
 	}
 
-	return &DeleteSourceOutput{
-		Body: struct{}{},
-	}, nil
+	return nil, nil
 }
