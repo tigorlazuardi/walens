@@ -234,13 +234,3 @@ func findRepoRoot() string {
 		dir = parent
 	}
 }
-
-// GetOutDir returns the configured output directory.
-func GetOutDir() string {
-	return defaultOutput
-}
-
-// GetMigrationsDir returns the configured migrations directory.
-func GetMigrationsDir() string {
-	return defaultMigrations
-}

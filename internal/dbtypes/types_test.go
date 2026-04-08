@@ -203,6 +203,59 @@ func TestUnixMilliDuration_Value(t *testing.T) {
 	}
 }
 
+func TestUnixMilliDuration_JSONMarshal(t *testing.T) {
+	d := NewUnixMilliDuration(1500 * time.Millisecond)
+
+	data, err := json.Marshal(d)
+	if err != nil {
+		t.Fatalf("MarshalJSON() error = %v", err)
+	}
+
+	if string(data) != "1500" {
+		t.Fatalf("MarshalJSON() = %s, want 1500", string(data))
+	}
+}
+
+func TestUnixMilliDuration_JSONUnmarshalMilliseconds(t *testing.T) {
+	var d UnixMilliDuration
+	if err := json.Unmarshal([]byte("2500"), &d); err != nil {
+		t.Fatalf("UnmarshalJSON() error = %v", err)
+	}
+
+	if time.Duration(d) != 2500*time.Millisecond {
+		t.Fatalf("UnmarshalJSON() = %v, want %v", time.Duration(d), 2500*time.Millisecond)
+	}
+}
+
+func TestUnixMilliDuration_JSONUnmarshalDurationString(t *testing.T) {
+	var d UnixMilliDuration
+	if err := json.Unmarshal([]byte(`"1.5s"`), &d); err != nil {
+		t.Fatalf("UnmarshalJSON() error = %v", err)
+	}
+
+	if time.Duration(d) != 1500*time.Millisecond {
+		t.Fatalf("UnmarshalJSON() = %v, want %v", time.Duration(d), 1500*time.Millisecond)
+	}
+}
+
+func TestUnixMilliDuration_JSONUnmarshalNull(t *testing.T) {
+	d := NewUnixMilliDuration(5 * time.Second)
+	if err := json.Unmarshal([]byte("null"), &d); err != nil {
+		t.Fatalf("UnmarshalJSON(null) error = %v", err)
+	}
+
+	if time.Duration(d) != 0 {
+		t.Fatalf("UnmarshalJSON(null) = %v, want 0", time.Duration(d))
+	}
+}
+
+func TestUnixMilliDuration_JSONUnmarshalInvalid(t *testing.T) {
+	var d UnixMilliDuration
+	if err := json.Unmarshal([]byte(`"nope"`), &d); err == nil {
+		t.Fatal("UnmarshalJSON() expected error for invalid duration string")
+	}
+}
+
 func TestUUID_Scan(t *testing.T) {
 	validUUID := "01915f37-0187-7000-8e63-d83a9f70d5e8"
 	parsed, _ := uuid.Parse(validUUID)
@@ -381,6 +434,8 @@ var (
 	_ sql.Scanner         = (*UnixMilliDuration)(nil)
 	_ driver.Valuer       = UnixMilliDuration(0)
 	_ huma.SchemaProvider = UnixMilliDuration(0)
+	_ json.Marshaler      = UnixMilliDuration(0)
+	_ json.Unmarshaler    = (*UnixMilliDuration)(nil)
 
 	_ sql.Scanner         = (*UUID)(nil)
 	_ driver.Valuer       = UUID{}

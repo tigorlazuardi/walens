@@ -205,6 +205,13 @@ func (d *UnixMilliDuration) Scan(src interface{}) error {
 		ms = int64(v)
 	case []byte:
 		fmt.Sscanf(string(v), "%d", &ms)
+	case string:
+		val, err := time.ParseDuration(v)
+		if err != nil {
+			return err
+		}
+		*d = UnixMilliDuration(val)
+		return nil
 	default:
 		return fmt.Errorf("cannot scan %T into UnixMilliDuration", src)
 	}
@@ -476,6 +483,8 @@ var (
 	_ sql.Scanner         = (*UnixMilliDuration)(nil)
 	_ driver.Valuer       = UnixMilliDuration(0)
 	_ huma.SchemaProvider = UnixMilliDuration(0)
+	_ json.Marshaler      = UnixMilliDuration(0)
+	_ json.Unmarshaler    = (*UnixMilliDuration)(nil)
 
 	_ sql.Scanner         = (*UUID)(nil)
 	_ driver.Valuer       = UUID{}
