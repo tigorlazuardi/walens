@@ -18,8 +18,10 @@ import (
 
 const redditPageLimit = 100
 
-var redditHTTPClient = http.DefaultClient
-var redditBaseURL = "https://www.reddit.com"
+var (
+	redditHTTPClient = http.DefaultClient
+	redditBaseURL    = "https://www.reddit.com"
+)
 
 // Source implements a template Reddit-based wallpaper source.
 type Source struct{}
