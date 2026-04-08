@@ -18,12 +18,14 @@ import (
 	"github.com/walens/walens/internal/auth"
 	"github.com/walens/walens/internal/config"
 	"github.com/walens/walens/internal/db"
+	"github.com/walens/walens/internal/dbtypes"
 	"github.com/walens/walens/internal/logger"
 	"github.com/walens/walens/internal/queue"
 	"github.com/walens/walens/internal/routes"
 	"github.com/walens/walens/internal/runner"
 	"github.com/walens/walens/internal/scheduler"
 	"github.com/walens/walens/internal/services/configs"
+	"github.com/walens/walens/internal/services/jobs"
 	sourcesvc "github.com/walens/walens/internal/services/sources"
 	"github.com/walens/walens/internal/sources"
 	"github.com/walens/walens/internal/sources/booru"
@@ -38,6 +40,7 @@ type App struct {
 	logger         *slog.Logger
 	db             *sql.DB
 	configService  *configs.Service
+	jobsService    *jobs.Service
 	sourcesService *sourcesvc.Service
 	sourceRegistry *sources.Registry
 	server         *http.Server
@@ -147,6 +150,14 @@ func (a *App) initDB() error {
 	// Initialize sources service with db and registry
 	a.sourcesService = sourcesvc.NewService(a.db, a.sourceRegistry)
 
+	// Initialize jobs service
+	a.jobsService = jobs.NewService(a.db)
+
+	// Boot recovery: requeue unfinished jobs from persisted state
+	if err := a.recoverJobs(context.Background()); err != nil {
+		a.logger.Warn("boot recovery: failed to recover jobs", "error", err)
+	}
+
 	defaultPersistedCfg := configs.DefaultPersistedConfig()
 	defaultPersistedCfg.ApplyBootstrapConfig(a.config)
 	persistedCfg, err := a.configService.BootstrapDefault(context.Background(), defaultPersistedCfg)
@@ -172,6 +183,66 @@ func (a *App) initDB() error {
 	// Give scheduler access to DB for reload queries
 	a.scheduler.SetDB(a.db)
 
+	return nil
+}
+
+// recoverJobs performs boot recovery by requeuing unfinished jobs from the database.
+// It retrieves queued and running jobs, resets running jobs to queued state,
+// marks them for recovery, and enqueues them in the in-memory queue.
+func (a *App) recoverJobs(ctx context.Context) error {
+	if a.jobsService == nil || a.db == nil {
+		return nil
+	}
+
+	// Get all jobs that need recovery (queued and running)
+	jobsToRecover, err := a.jobsService.GetJobsForRecovery(ctx)
+	if err != nil {
+		return fmt.Errorf("get jobs for recovery: %w", err)
+	}
+
+	if len(jobsToRecover) == 0 {
+		a.logger.Info("boot recovery: no unfinished jobs to recover")
+		return nil
+	}
+
+	a.logger.Info("boot recovery: found unfinished jobs", "count", len(jobsToRecover))
+
+	// Reset running jobs back to queued state
+	recoveredCount, err := a.jobsService.RecoverRunningJobs(ctx)
+	if err != nil {
+		a.logger.Warn("boot recovery: failed to reset running jobs", "error", err)
+	} else if recoveredCount > 0 {
+		a.logger.Info("boot recovery: reset running jobs to queued", "count", recoveredCount)
+	}
+
+	// Collect job IDs for marking as recovery
+	jobIDs := make([]dbtypes.UUID, 0, len(jobsToRecover))
+	for _, job := range jobsToRecover {
+		if job.ID != nil {
+			jobIDs = append(jobIDs, *job.ID)
+		}
+	}
+
+	// Mark recovered jobs with trigger_kind=recovery
+	if len(jobIDs) > 0 {
+		markedCount, err := a.jobsService.MarkJobsForRecovery(ctx, jobIDs)
+		if err != nil {
+			a.logger.Warn("boot recovery: failed to mark jobs for recovery", "error", err)
+		} else {
+			a.logger.Info("boot recovery: marked jobs for recovery", "count", markedCount)
+		}
+	}
+
+	// Enqueue all recovered jobs in the in-memory queue
+	enqueuedCount := 0
+	for _, job := range jobsToRecover {
+		if job.ID != nil {
+			a.queue.Enqueue(job.ID.UUID.String())
+			enqueuedCount++
+		}
+	}
+
+	a.logger.Info("boot recovery: enqueued jobs to in-memory queue", "count", enqueuedCount)
 	return nil
 }
 
