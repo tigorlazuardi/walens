@@ -958,3 +958,304 @@ func TestInitDBPreservesAuthBootstrapOnly(t *testing.T) {
 		t.Errorf("expected Auth.Enabled true, got: %v", app.config.Auth.Enabled)
 	}
 }
+
+// TestGetConfigRoute tests the GET /api/v1/configs/GetConfig endpoint.
+func TestGetConfigRoute(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := tmpDir + "/test.db"
+
+	testDB, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("failed to open test db: %v", err)
+	}
+	defer testDB.Close()
+
+	// Run migrations
+	if err := db.RunMigrations(testDB); err != nil {
+		t.Fatalf("RunMigrations failed: %v", err)
+	}
+
+	cfg := &config.Config{
+		Server: config.ServerConfig{
+			Host:     "localhost",
+			Port:     0,
+			BasePath: "/",
+		},
+		Database: config.DatabaseConfig{
+			Path: dbPath,
+		},
+		Auth: config.AuthConfig{
+			Enabled:      false,
+			CookieSecret: testCookieSecret,
+		},
+		DataDir:  tmpDir,
+		LogLevel: "info",
+	}
+
+	app := &App{
+		config: cfg,
+		logger: slog.Default(),
+		db:     testDB,
+		queue:  queue.New(slog.Default()),
+		runner: runner.New(slog.Default()),
+	}
+
+	// Initialize configService
+	app.configService = configs.NewService(app.db)
+
+	// Set up a minimal scheduler for initDB
+	app.scheduler = scheduler.New(slog.Default())
+	app.runner.SetQueue(app.queue)
+
+	handler := app.Handler()
+
+	// Test GetConfig returns defaults when no config is set
+	t.Run("get config returns defaults", func(t *testing.T) {
+		body := `{}`
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/configs/GetConfig", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Errorf("expected status %d, got %d, body: %s", http.StatusOK, rec.Code, rec.Body.String())
+		}
+
+		var resp map[string]interface{}
+		if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("failed to unmarshal response: %v", err)
+		}
+
+		// Huma returns body fields at the top level of the response
+		if resp["data_dir"] != "./data" {
+			t.Errorf("expected data_dir './data', got: %v", resp["data_dir"])
+		}
+		if resp["log_level"] != "info" {
+			t.Errorf("expected log_level 'info', got: %v", resp["log_level"])
+		}
+	})
+
+	// Test UpdateConfig stores new config
+	t.Run("update config stores new values", func(t *testing.T) {
+		body := `{"data_dir":"/new/data","log_level":"debug"}`
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/configs/UpdateConfig", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Errorf("expected status %d, got %d, body: %s", http.StatusOK, rec.Code, rec.Body.String())
+		}
+
+		var resp map[string]interface{}
+		if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("failed to unmarshal response: %v", err)
+		}
+
+		if resp["data_dir"] != "/new/data" {
+			t.Errorf("expected data_dir '/new/data', got: %v", resp["data_dir"])
+		}
+		if resp["log_level"] != "debug" {
+			t.Errorf("expected log_level 'debug', got: %v", resp["log_level"])
+		}
+	})
+
+	// Test GetConfig returns updated values
+	t.Run("get config returns updated values", func(t *testing.T) {
+		body := `{}`
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/configs/GetConfig", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Errorf("expected status %d, got %d, body: %s", http.StatusOK, rec.Code, rec.Body.String())
+		}
+
+		var resp map[string]interface{}
+		if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("failed to unmarshal response: %v", err)
+		}
+
+		if resp["data_dir"] != "/new/data" {
+			t.Errorf("expected data_dir '/new/data', got: %v", resp["data_dir"])
+		}
+		if resp["log_level"] != "debug" {
+			t.Errorf("expected log_level 'debug', got: %v", resp["log_level"])
+		}
+	})
+}
+
+// TestGetConfigRouteWithAuth tests the config endpoints with auth enabled.
+func TestGetConfigRouteWithAuth(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := tmpDir + "/test.db"
+
+	testDB, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("failed to open test db: %v", err)
+	}
+	defer testDB.Close()
+
+	// Run migrations
+	if err := db.RunMigrations(testDB); err != nil {
+		t.Fatalf("RunMigrations failed: %v", err)
+	}
+
+	cfg := &config.Config{
+		Server: config.ServerConfig{
+			Host:     "localhost",
+			Port:     0,
+			BasePath: "/",
+		},
+		Database: config.DatabaseConfig{
+			Path: dbPath,
+		},
+		Auth: config.AuthConfig{
+			Enabled:      true,
+			Username:     "testuser",
+			Password:     "testpass",
+			CookieSecret: testCookieSecret,
+		},
+		DataDir:  tmpDir,
+		LogLevel: "info",
+	}
+
+	app := &App{
+		config: cfg,
+		logger: slog.Default(),
+		db:     testDB,
+		queue:  queue.New(slog.Default()),
+		runner: runner.New(slog.Default()),
+	}
+
+	// Initialize configService
+	app.configService = configs.NewService(app.db)
+
+	// Set up a minimal scheduler for initDB
+	app.scheduler = scheduler.New(slog.Default())
+	app.runner.SetQueue(app.queue)
+
+	handler := app.Handler()
+
+	// Test GetConfig requires auth
+	t.Run("get config requires auth", func(t *testing.T) {
+		body := `{}`
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/configs/GetConfig", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusUnauthorized {
+			t.Errorf("expected status %d, got %d", http.StatusUnauthorized, rec.Code)
+		}
+	})
+
+	// Test GetConfig with valid auth
+	t.Run("get config with valid auth", func(t *testing.T) {
+		body := `{}`
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/configs/GetConfig", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		creds := base64.StdEncoding.EncodeToString([]byte("testuser:testpass"))
+		req.Header.Set("Authorization", "Basic "+creds)
+
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Errorf("expected status %d, got %d, body: %s", http.StatusOK, rec.Code, rec.Body.String())
+		}
+	})
+}
+
+// TestConfigRouteWithBasePath tests config routes with a non-root base path.
+func TestConfigRouteWithBasePath(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := tmpDir + "/test.db"
+
+	testDB, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("failed to open test db: %v", err)
+	}
+	defer testDB.Close()
+
+	// Run migrations
+	if err := db.RunMigrations(testDB); err != nil {
+		t.Fatalf("RunMigrations failed: %v", err)
+	}
+
+	cfg := &config.Config{
+		Server: config.ServerConfig{
+			Host:     "localhost",
+			Port:     0,
+			BasePath: "/walens",
+		},
+		Database: config.DatabaseConfig{
+			Path: dbPath,
+		},
+		Auth: config.AuthConfig{
+			Enabled:      false,
+			CookieSecret: testCookieSecret,
+		},
+		DataDir:  tmpDir,
+		LogLevel: "info",
+	}
+
+	app := &App{
+		config: cfg,
+		logger: slog.Default(),
+		db:     testDB,
+		queue:  queue.New(slog.Default()),
+		runner: runner.New(slog.Default()),
+	}
+
+	// Initialize configService
+	app.configService = configs.NewService(app.db)
+
+	// Set up a minimal scheduler for initDB
+	app.scheduler = scheduler.New(slog.Default())
+	app.runner.SetQueue(app.queue)
+
+	handler := app.Handler()
+
+	// Test GetConfig at /walens/api/v1/configs/GetConfig
+	t.Run("get config with base path", func(t *testing.T) {
+		body := `{}`
+		req := httptest.NewRequest(http.MethodPost, "/walens/api/v1/configs/GetConfig", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Errorf("expected status %d, got %d, body: %s", http.StatusOK, rec.Code, rec.Body.String())
+		}
+	})
+
+	// Test UpdateConfig at /walens/api/v1/configs/UpdateConfig
+	t.Run("update config with base path", func(t *testing.T) {
+		body := `{"data_dir":"/walens/data","log_level":"warn"}`
+		req := httptest.NewRequest(http.MethodPost, "/walens/api/v1/configs/UpdateConfig", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Errorf("expected status %d, got %d, body: %s", http.StatusOK, rec.Code, rec.Body.String())
+		}
+
+		var resp map[string]interface{}
+		if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("failed to unmarshal response: %v", err)
+		}
+
+		if resp["data_dir"] != "/walens/data" {
+			t.Errorf("expected data_dir '/walens/data', got: %v", resp["data_dir"])
+		}
+	})
+}

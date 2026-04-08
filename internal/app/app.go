@@ -20,6 +20,7 @@ import (
 	"github.com/walens/walens/internal/db"
 	"github.com/walens/walens/internal/logger"
 	"github.com/walens/walens/internal/queue"
+	"github.com/walens/walens/internal/routes"
 	"github.com/walens/walens/internal/runner"
 	"github.com/walens/walens/internal/scheduler"
 	"github.com/walens/walens/internal/services/configs"
@@ -29,14 +30,15 @@ type authCookieSecureContextKey struct{}
 
 // App manages the lifecycle of all application components.
 type App struct {
-	config    *config.Config
-	logger    *slog.Logger
-	db        *sql.DB
-	server    *http.Server
-	scheduler *scheduler.Scheduler
-	queue     *queue.Queue
-	runner    *runner.Runner
-	handler   http.Handler
+	config        *config.Config
+	logger        *slog.Logger
+	db            *sql.DB
+	configService *configs.Service
+	server        *http.Server
+	scheduler     *scheduler.Scheduler
+	queue         *queue.Queue
+	runner        *runner.Runner
+	handler       http.Handler
 }
 
 // New creates a new application instance.
@@ -125,10 +127,10 @@ func (a *App) initDB() error {
 	a.logger.Info("database migrations applied")
 
 	// Load persisted config after migrations. If absent or empty, inject defaults.
-	configService := configs.NewService(a.db)
+	a.configService = configs.NewService(a.db)
 	defaultPersistedCfg := configs.DefaultPersistedConfig()
 	defaultPersistedCfg.ApplyBootstrapConfig(a.config)
-	persistedCfg, err := configService.BootstrapDefault(context.Background(), defaultPersistedCfg)
+	persistedCfg, err := a.configService.BootstrapDefault(context.Background(), defaultPersistedCfg)
 	if err != nil {
 		return fmt.Errorf("failed to bootstrap persisted config: %w", err)
 	}
@@ -304,6 +306,9 @@ func (a *App) registerHumaRoutes(api huma.API, basePath string, authConfig auth.
 	}, func(ctx context.Context, input *logoutInput) (*logoutOutput, error) {
 		return &logoutOutput{}, nil
 	})
+
+	// Register configs RPC routes
+	routes.RegisterConfigsRoutes(api, basePath, a.configService)
 }
 
 // startHTTPServer configures and starts the HTTP server with health endpoint.
