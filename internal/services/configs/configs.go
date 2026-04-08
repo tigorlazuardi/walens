@@ -28,8 +28,8 @@ func NewService(db *sql.DB) *Service {
 // to the database. Only fields that make sense to change at runtime are persisted.
 // Auth configuration and bootstrap-only fields are intentionally excluded.
 type PersistedConfig struct {
-	DataDir  string `json:"data_dir"`
-	LogLevel string `json:"log_level"`
+	DataDir  string `json:"data_dir" doc:"Directory for storing application data."`
+	LogLevel string `json:"log_level" doc:"Logging level (debug, info, warn, error)."`
 }
 
 // DefaultPersistedConfig returns the built-in persisted config defaults.

@@ -304,6 +304,11 @@ Route layer rules:
 - thin only
 - define Huma operation metadata
 - keep each `huma.Operation` definition next to its handler in the same route file instead of inlining it at the `huma.Register(...)` call site
+- minimize redefining identical structs/models between layers; reuse existing request/response shapes whenever practical
+- if API DTO shape is exactly the same as an existing model, prefer reusing it directly or via type alias instead of creating a duplicate struct
+- prefer composition over redefining structs when API transport differs only slightly from an existing model
+- if only 1-2 fields need to be excluded from request/response transport, compose the existing model and hide those fields with `json:"-"` before introducing a brand new DTO
+- only define a new API DTO when transport requirements actually differ from the existing model shape
 - translate DTOs if needed
 - call service methods
 - do not hold business logic
