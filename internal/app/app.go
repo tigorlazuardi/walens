@@ -24,21 +24,24 @@ import (
 	"github.com/walens/walens/internal/runner"
 	"github.com/walens/walens/internal/scheduler"
 	"github.com/walens/walens/internal/services/configs"
+	"github.com/walens/walens/internal/sources"
+	"github.com/walens/walens/internal/sources/booru"
 )
 
 type authCookieSecureContextKey struct{}
 
 // App manages the lifecycle of all application components.
 type App struct {
-	config        *config.Config
-	logger        *slog.Logger
-	db            *sql.DB
-	configService *configs.Service
-	server        *http.Server
-	scheduler     *scheduler.Scheduler
-	queue         *queue.Queue
-	runner        *runner.Runner
-	handler       http.Handler
+	config         *config.Config
+	logger         *slog.Logger
+	db             *sql.DB
+	configService  *configs.Service
+	sourceRegistry *sources.Registry
+	server         *http.Server
+	scheduler      *scheduler.Scheduler
+	queue          *queue.Queue
+	runner         *runner.Runner
+	handler        http.Handler
 }
 
 // New creates a new application instance.
@@ -49,14 +52,22 @@ func New(cfg *config.Config) *App {
 	sc := scheduler.New(log)
 	ru := runner.New(log)
 	ru.SetQueue(q)
+	registry := newSourceRegistry()
 
 	return &App{
-		config:    cfg,
-		logger:    log,
-		scheduler: sc,
-		queue:     q,
-		runner:    ru,
+		config:         cfg,
+		logger:         log,
+		scheduler:      sc,
+		queue:          q,
+		runner:         ru,
+		sourceRegistry: registry,
 	}
+}
+
+func newSourceRegistry() *sources.Registry {
+	registry := sources.NewRegistry()
+	registry.Register(booru.New())
+	return registry
 }
 
 // Handler returns the HTTP handler for the application, useful for testing.
@@ -172,6 +183,9 @@ func joinPath(base, suffix string) string {
 func (a *App) buildHTTPHandler() http.Handler {
 	mux := http.NewServeMux()
 	basePath := a.config.Server.BasePath
+	if a.sourceRegistry == nil {
+		a.sourceRegistry = newSourceRegistry()
+	}
 	humaConfig := huma.DefaultConfig("Walens API", "0.0.1")
 	humaConfig.OpenAPIPath = joinPath(basePath, "/openapi")
 	humaConfig.DocsPath = joinPath(basePath, "/docs")
@@ -309,6 +323,9 @@ func (a *App) registerHumaRoutes(api huma.API, basePath string, authConfig auth.
 
 	// Register configs RPC routes
 	routes.RegisterConfigsRoutes(api, basePath, a.configService)
+
+	// Register source types RPC routes
+	routes.RegisterSourceTypesRoutes(api, basePath, a.sourceRegistry)
 }
 
 // startHTTPServer configures and starts the HTTP server with health endpoint.

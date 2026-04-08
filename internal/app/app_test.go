@@ -1259,3 +1259,322 @@ func TestConfigRouteWithBasePath(t *testing.T) {
 		}
 	})
 }
+
+// TestSourceTypesRoutes tests the source_types API endpoints.
+func TestSourceTypesRoutes(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := tmpDir + "/test.db"
+
+	testDB, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("failed to open test db: %v", err)
+	}
+	defer testDB.Close()
+
+	// Run migrations
+	if err := db.RunMigrations(testDB); err != nil {
+		t.Fatalf("RunMigrations failed: %v", err)
+	}
+
+	cfg := &config.Config{
+		Server: config.ServerConfig{
+			Host:     "localhost",
+			Port:     0,
+			BasePath: "/",
+		},
+		Database: config.DatabaseConfig{
+			Path: dbPath,
+		},
+		Auth: config.AuthConfig{
+			Enabled:      false,
+			CookieSecret: testCookieSecret,
+		},
+		DataDir:  tmpDir,
+		LogLevel: "info",
+	}
+
+	app := &App{
+		config: cfg,
+		logger: slog.Default(),
+		db:     testDB,
+		queue:  queue.New(slog.Default()),
+		runner: runner.New(slog.Default()),
+	}
+
+	// Initialize configService
+	app.configService = configs.NewService(app.db)
+
+	// Set up a minimal scheduler for initDB
+	app.scheduler = scheduler.New(slog.Default())
+	app.runner.SetQueue(app.queue)
+
+	handler := app.Handler()
+
+	// Test ListSourceTypes
+	t.Run("list source types returns registered sources", func(t *testing.T) {
+		body := `{}`
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/source_types/ListSourceTypes", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Errorf("expected status %d, got %d, body: %s", http.StatusOK, rec.Code, rec.Body.String())
+		}
+
+		var resp map[string]interface{}
+		if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("failed to unmarshal response: %v", err)
+		}
+
+		// Huma unwraps Body field - items are at top level
+		items, ok := resp["items"].([]interface{})
+		if !ok {
+			t.Fatalf("expected 'items' field in response, got: %v", resp)
+		}
+
+		if len(items) == 0 {
+			t.Error("expected at least one source type")
+		}
+
+		// Check booru is in the list
+		found := false
+		for _, item := range items {
+			itemMap, ok := item.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			if itemMap["type_name"] == "booru" {
+				found = true
+				if itemMap["display_name"] != "Booru Image Board" {
+					t.Errorf("expected display_name 'Booru Image Board', got: %v", itemMap["display_name"])
+				}
+				defaultCount, ok := itemMap["default_lookup_count"].(float64)
+				if !ok {
+					t.Error("expected default_lookup_count to be a number")
+				}
+				if int(defaultCount) != 100 {
+					t.Errorf("expected default_lookup_count 100, got: %v", defaultCount)
+				}
+				break
+			}
+		}
+		if !found {
+			t.Error("expected 'booru' source type to be in list")
+		}
+	})
+
+	// Test GetSourceType
+	t.Run("get source type returns booru metadata", func(t *testing.T) {
+		body := `{"type_name":"booru"}`
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/source_types/GetSourceType", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Errorf("expected status %d, got %d, body: %s", http.StatusOK, rec.Code, rec.Body.String())
+		}
+
+		var resp map[string]interface{}
+		if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("failed to unmarshal response: %v", err)
+		}
+
+		// Huma unwraps Body field - type_name and display_name are at top level
+		if resp["type_name"] != "booru" {
+			t.Errorf("expected type_name 'booru', got: %v", resp["type_name"])
+		}
+		if resp["display_name"] != "Booru Image Board" {
+			t.Errorf("expected display_name 'Booru Image Board', got: %v", resp["display_name"])
+		}
+	})
+
+	// Test GetSourceType not found
+	t.Run("get source type returns 404 for unknown type", func(t *testing.T) {
+		body := `{"type_name":"nonexistent"}`
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/source_types/GetSourceType", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusNotFound {
+			t.Errorf("expected status %d, got %d, body: %s", http.StatusNotFound, rec.Code, rec.Body.String())
+		}
+	})
+}
+
+// TestSourceTypesRoutesWithAuth tests the source_types API endpoints with auth enabled.
+func TestSourceTypesRoutesWithAuth(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := tmpDir + "/test.db"
+
+	testDB, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("failed to open test db: %v", err)
+	}
+	defer testDB.Close()
+
+	// Run migrations
+	if err := db.RunMigrations(testDB); err != nil {
+		t.Fatalf("RunMigrations failed: %v", err)
+	}
+
+	cfg := &config.Config{
+		Server: config.ServerConfig{
+			Host:     "localhost",
+			Port:     0,
+			BasePath: "/",
+		},
+		Database: config.DatabaseConfig{
+			Path: dbPath,
+		},
+		Auth: config.AuthConfig{
+			Enabled:      true,
+			Username:     "testuser",
+			Password:     "testpass",
+			CookieSecret: testCookieSecret,
+		},
+		DataDir:  tmpDir,
+		LogLevel: "info",
+	}
+
+	app := &App{
+		config: cfg,
+		logger: slog.Default(),
+		db:     testDB,
+		queue:  queue.New(slog.Default()),
+		runner: runner.New(slog.Default()),
+	}
+
+	// Initialize configService
+	app.configService = configs.NewService(app.db)
+
+	// Set up a minimal scheduler for initDB
+	app.scheduler = scheduler.New(slog.Default())
+	app.runner.SetQueue(app.queue)
+
+	handler := app.Handler()
+
+	// Test ListSourceTypes requires auth
+	t.Run("list source types requires auth", func(t *testing.T) {
+		body := `{}`
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/source_types/ListSourceTypes", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusUnauthorized {
+			t.Errorf("expected status %d, got %d", http.StatusUnauthorized, rec.Code)
+		}
+	})
+
+	// Test ListSourceTypes with valid auth
+	t.Run("list source types with valid auth", func(t *testing.T) {
+		body := `{}`
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/source_types/ListSourceTypes", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		creds := base64.StdEncoding.EncodeToString([]byte("testuser:testpass"))
+		req.Header.Set("Authorization", "Basic "+creds)
+
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Errorf("expected status %d, got %d, body: %s", http.StatusOK, rec.Code, rec.Body.String())
+		}
+	})
+}
+
+// TestSourceTypesRoutesWithBasePath tests source_types routes with a non-root base path.
+func TestSourceTypesRoutesWithBasePath(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := tmpDir + "/test.db"
+
+	testDB, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("failed to open test db: %v", err)
+	}
+	defer testDB.Close()
+
+	// Run migrations
+	if err := db.RunMigrations(testDB); err != nil {
+		t.Fatalf("RunMigrations failed: %v", err)
+	}
+
+	cfg := &config.Config{
+		Server: config.ServerConfig{
+			Host:     "localhost",
+			Port:     0,
+			BasePath: "/walens",
+		},
+		Database: config.DatabaseConfig{
+			Path: dbPath,
+		},
+		Auth: config.AuthConfig{
+			Enabled:      false,
+			CookieSecret: testCookieSecret,
+		},
+		DataDir:  tmpDir,
+		LogLevel: "info",
+	}
+
+	app := &App{
+		config: cfg,
+		logger: slog.Default(),
+		db:     testDB,
+		queue:  queue.New(slog.Default()),
+		runner: runner.New(slog.Default()),
+	}
+
+	// Initialize configService
+	app.configService = configs.NewService(app.db)
+
+	// Set up a minimal scheduler for initDB
+	app.scheduler = scheduler.New(slog.Default())
+	app.runner.SetQueue(app.queue)
+
+	handler := app.Handler()
+
+	// Test ListSourceTypes at /walens/api/v1/source_types/ListSourceTypes
+	t.Run("list source types with base path", func(t *testing.T) {
+		body := `{}`
+		req := httptest.NewRequest(http.MethodPost, "/walens/api/v1/source_types/ListSourceTypes", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Errorf("expected status %d, got %d, body: %s", http.StatusOK, rec.Code, rec.Body.String())
+		}
+	})
+
+	// Test GetSourceType at /walens/api/v1/source_types/GetSourceType
+	t.Run("get source type with base path", func(t *testing.T) {
+		body := `{"type_name":"booru"}`
+		req := httptest.NewRequest(http.MethodPost, "/walens/api/v1/source_types/GetSourceType", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Errorf("expected status %d, got %d, body: %s", http.StatusOK, rec.Code, rec.Body.String())
+		}
+
+		var resp map[string]interface{}
+		if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("failed to unmarshal response: %v", err)
+		}
+
+		// Huma unwraps Body field
+		if resp["type_name"] != "booru" {
+			t.Errorf("expected type_name 'booru', got: %v", resp["type_name"])
+		}
+	})
+}
