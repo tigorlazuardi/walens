@@ -6,11 +6,13 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 	configsroutes "github.com/walens/walens/internal/routes/configs"
+	devicesroutes "github.com/walens/walens/internal/routes/devices"
 	schedulesroutes "github.com/walens/walens/internal/routes/source_schedules"
 	sourcetypesroutes "github.com/walens/walens/internal/routes/source_types"
 	sourceroutes "github.com/walens/walens/internal/routes/sources"
 	"github.com/walens/walens/internal/scheduler"
 	configssvc "github.com/walens/walens/internal/services/configs"
+	devicessvc "github.com/walens/walens/internal/services/devices"
 	schedulessvc "github.com/walens/walens/internal/services/source_schedules"
 	sourcetypessvc "github.com/walens/walens/internal/services/source_types"
 	sourcessvc "github.com/walens/walens/internal/services/sources"
@@ -99,5 +101,35 @@ func RegisterSourceSchedulesRoutes(api huma.API, basePath string, db *sql.DB, sc
 
 	huma.Register(api, schedulesroutes.DeleteSourceScheduleOperation(basePath), func(ctx context.Context, input *schedulesroutes.DeleteSourceScheduleInput) (*struct{}, error) {
 		return schedulesroutes.DeleteSourceSchedule(ctx, input, schedService)
+	})
+}
+
+// RegisterDevicesRoutes registers all devices RPC routes under /api/v1/devices/.
+func RegisterDevicesRoutes(api huma.API, basePath string, db *sql.DB) {
+	var devicesService *devicessvc.Service
+	if db != nil {
+		devicesService = devicessvc.NewService(db)
+	} else {
+		devicesService = devicessvc.NewService(nil)
+	}
+
+	huma.Register(api, devicesroutes.ListDevicesOperation(basePath), func(ctx context.Context, input *devicesroutes.ListDevicesInput) (*devicesroutes.ListDevicesOutput, error) {
+		return devicesroutes.ListDevices(ctx, input, devicesService)
+	})
+
+	huma.Register(api, devicesroutes.GetDeviceOperation(basePath), func(ctx context.Context, input *devicesroutes.GetDeviceInput) (*devicesroutes.GetDeviceOutput, error) {
+		return devicesroutes.GetDevice(ctx, input, devicesService)
+	})
+
+	huma.Register(api, devicesroutes.CreateDeviceOperation(basePath), func(ctx context.Context, input *devicesroutes.CreateDeviceInput) (*devicesroutes.CreateDeviceOutput, error) {
+		return devicesroutes.CreateDevice(ctx, input, devicesService)
+	})
+
+	huma.Register(api, devicesroutes.UpdateDeviceOperation(basePath), func(ctx context.Context, input *devicesroutes.UpdateDeviceInput) (*devicesroutes.UpdateDeviceOutput, error) {
+		return devicesroutes.UpdateDevice(ctx, input, devicesService)
+	})
+
+	huma.Register(api, devicesroutes.DeleteDeviceOperation(basePath), func(ctx context.Context, input *devicesroutes.DeleteDeviceInput) (*struct{}, error) {
+		return devicesroutes.DeleteDevice(ctx, input, devicesService)
 	})
 }
