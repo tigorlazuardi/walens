@@ -415,14 +415,6 @@ func (n *NullUUID) Scan(src interface{}) error {
 // JSON marshaling for transport
 // =============================================================================
 
-// MarshalJSON implements json.Marshaler for UnixMilliTime.
-func (t UnixMilliTime) MarshalJSON() ([]byte, error) {
-	if t.Time.IsZero() {
-		return []byte("null"), nil
-	}
-	return json.Marshal(t.Time)
-}
-
 // UnmarshalJSON implements json.Unmarshaler for UnixMilliTime.
 func (t *UnixMilliTime) UnmarshalJSON(data []byte) error {
 	if string(data) == "null" || len(data) == 0 {
