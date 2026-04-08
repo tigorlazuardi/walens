@@ -26,6 +26,7 @@ import (
 	"github.com/walens/walens/internal/services/configs"
 	"github.com/walens/walens/internal/sources"
 	"github.com/walens/walens/internal/sources/booru"
+	"github.com/walens/walens/internal/sources/reddit"
 )
 
 type authCookieSecureContextKey struct{}
@@ -67,6 +68,7 @@ func New(cfg *config.Config) *App {
 func newSourceRegistry() *sources.Registry {
 	registry := sources.NewRegistry()
 	registry.Register(booru.New())
+	registry.Register(reddit.New())
 	return registry
 }
 
