@@ -13,6 +13,11 @@ import (
 	_ "modernc.org/sqlite"
 )
 
+func stringPtr(v string) *string                    { return &v }
+func int64Ptr(v int64) *int64                       { return &v }
+func boolPtr(v bool) *bool                          { return &v }
+func rawJSONPtr(v json.RawMessage) *json.RawMessage { return &v }
+
 func testRegistry() *sources.Registry {
 	registry := sources.NewRegistry()
 	registry.Register(booru.New())
@@ -277,11 +282,11 @@ func TestServiceUpdateSource(t *testing.T) {
 	id, _ := dbtypes.NewUUIDFromString("01800000-0000-0000-0000-000000000001")
 	input := &UpdateSourceInput{
 		ID:          id,
-		Name:        "updated-source",
-		SourceType:  "booru",
-		Params:      json.RawMessage(`{"tags":["nature","mountain"]}`),
-		LookupCount: 200,
-		IsEnabled:   false,
+		Name:        stringPtr("updated-source"),
+		SourceType:  stringPtr("booru"),
+		Params:      rawJSONPtr(json.RawMessage(`{"tags":["nature","mountain"]}`)),
+		LookupCount: int64Ptr(200),
+		IsEnabled:   boolPtr(false),
 	}
 
 	src, err := svc.UpdateSource(context.Background(), input)
@@ -308,11 +313,11 @@ func TestServiceUpdateSourceNotFound(t *testing.T) {
 	id, _ := dbtypes.NewUUIDFromString("01800000-0000-0000-0000-000000000001")
 	input := &UpdateSourceInput{
 		ID:          id,
-		Name:        "updated-source",
-		SourceType:  "booru",
-		Params:      json.RawMessage(`{"tags":["nature"]}`),
-		LookupCount: 50,
-		IsEnabled:   true,
+		Name:        stringPtr("updated-source"),
+		SourceType:  stringPtr("booru"),
+		Params:      rawJSONPtr(json.RawMessage(`{"tags":["nature"]}`)),
+		LookupCount: int64Ptr(50),
+		IsEnabled:   boolPtr(true),
 	}
 
 	_, err := svc.UpdateSource(context.Background(), input)
@@ -350,11 +355,11 @@ func TestServiceUpdateSourceDuplicateName(t *testing.T) {
 	id, _ := dbtypes.NewUUIDFromString("01800000-0000-0000-0000-000000000001")
 	input := &UpdateSourceInput{
 		ID:          id,
-		Name:        "source-2", // Try to rename to existing name
-		SourceType:  "booru",
-		Params:      json.RawMessage(`{"tags":["landscape"]}`),
-		LookupCount: 100,
-		IsEnabled:   true,
+		Name:        stringPtr("source-2"), // Try to rename to existing name
+		SourceType:  stringPtr("booru"),
+		Params:      rawJSONPtr(json.RawMessage(`{"tags":["landscape"]}`)),
+		LookupCount: int64Ptr(100),
+		IsEnabled:   boolPtr(true),
 	}
 
 	_, err = svc.UpdateSource(context.Background(), input)

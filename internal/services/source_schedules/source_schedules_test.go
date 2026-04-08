@@ -10,6 +10,8 @@ import (
 	_ "modernc.org/sqlite"
 )
 
+func uuidPtr(id dbtypes.UUID) *dbtypes.UUID { return &id }
+
 // mockScheduler implements SchedulerInterface for testing.
 type mockScheduler struct {
 	reloadCalled int
@@ -531,7 +533,7 @@ func TestCheckOverlapWarningsSingleSchedule(t *testing.T) {
 	schedules := []ScheduleWithSource{
 		{
 			ScheduleRow: ScheduleRow{
-				ID:       mustNewUUID("02800000-0000-0000-0000-000000000001"),
+				ID:       uuidPtr(mustNewUUID("02800000-0000-0000-0000-000000000001")),
 				CronExpr: "0 * * * *",
 			},
 			SourceName: "source-a",
@@ -550,14 +552,14 @@ func TestCheckOverlapWarningsNoOverlap(t *testing.T) {
 	schedules := []ScheduleWithSource{
 		{
 			ScheduleRow: ScheduleRow{
-				ID:       mustNewUUID("02800000-0000-0000-0000-000000000001"),
+				ID:       uuidPtr(mustNewUUID("02800000-0000-0000-0000-000000000001")),
 				CronExpr: "0 * * * *", // Every hour
 			},
 			SourceName: "source-a",
 		},
 		{
 			ScheduleRow: ScheduleRow{
-				ID:       mustNewUUID("02800000-0000-0000-0000-000000000002"),
+				ID:       uuidPtr(mustNewUUID("02800000-0000-0000-0000-000000000002")),
 				CronExpr: "30 * * * *", // Every hour at minute 30
 			},
 			SourceName: "source-a",
@@ -578,14 +580,14 @@ func TestCheckOverlapWarningsWithOverlap(t *testing.T) {
 	schedules := []ScheduleWithSource{
 		{
 			ScheduleRow: ScheduleRow{
-				ID:       mustNewUUID("02800000-0000-0000-0000-000000000001"),
+				ID:       uuidPtr(mustNewUUID("02800000-0000-0000-0000-000000000001")),
 				CronExpr: "0 * * * *", // Every hour at minute 0
 			},
 			SourceName: "source-a",
 		},
 		{
 			ScheduleRow: ScheduleRow{
-				ID:       mustNewUUID("02800000-0000-0000-0000-000000000002"),
+				ID:       uuidPtr(mustNewUUID("02800000-0000-0000-0000-000000000002")),
 				CronExpr: "2 * * * *", // Every hour at minute 2 (2 mins after, < 5 min warning threshold)
 			},
 			SourceName: "source-a",
@@ -613,14 +615,14 @@ func TestCheckOverlapWarningsDifferentSources(t *testing.T) {
 	schedules := []ScheduleWithSource{
 		{
 			ScheduleRow: ScheduleRow{
-				ID:       mustNewUUID("02800000-0000-0000-0000-000000000001"),
+				ID:       uuidPtr(mustNewUUID("02800000-0000-0000-0000-000000000001")),
 				CronExpr: "0 * * * *",
 			},
 			SourceName: "source-a",
 		},
 		{
 			ScheduleRow: ScheduleRow{
-				ID:       mustNewUUID("02800000-0000-0000-0000-000000000002"),
+				ID:       uuidPtr(mustNewUUID("02800000-0000-0000-0000-000000000002")),
 				CronExpr: "1 * * * *", // 1 minute after, but different source
 			},
 			SourceName: "source-b", // Different source

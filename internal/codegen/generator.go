@@ -25,7 +25,7 @@ func BuildWalensTemplate(modelPath string) template.Template {
 				return field
 			})
 		})
-		s.SQLBuilder.Skip = true
+		s.SQLBuilder.Skip = false
 		return s
 	})
 }

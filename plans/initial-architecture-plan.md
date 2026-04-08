@@ -1059,6 +1059,12 @@ Services should own application behavior.
 - enforce business rules
 - coordinate scheduler, queue, runner, and storage behavior
 - define method-level request/response contracts
+- use Go-Jet query builder for service-layer database queries and mutations; pure raw SQL is forbidden unless the user explicitly approves an exception or Go-Jet cannot express the required operation
+- for service-layer SQL written with Go-Jet, prefer dot import of the generated `internal/db/generated/table` package and dot import of `github.com/go-jet/jet/v2/sqlite` when that keeps query code visually close to SQL
+- for `SELECT` queries, prefer Go-Jet QRM mapping into generated Go-Jet model types instead of manual row scanning into custom mirror structs
+- for dynamic filtering, prefer the Go-Jet FAQ pattern starting from `Bool(true)` and chaining `.AND(...)`
+- for dynamic projection, prefer `ProjectionList` only when projection columns are truly dynamic; otherwise use generated `.AllColumns` directly instead of unnecessary helper wrappers
+- for count queries, prefer `COUNT(...)` in Go-Jet form rather than handwritten raw SQL count strings
 
 ### Example service structure
 
@@ -1103,8 +1109,8 @@ Recommended shared pagination types:
 ```go
 type CursorPaginationRequest struct {
     Next   *uuid.UUID `json:"next" doc:"Return items after this cursor if provided"`
-    Prev   *uuid.UUID `json:"prev" doc:"Return items before this cursor if provided"`
-    Offset uint64     `json:"offset" doc:"Maximum number of items to return from the cursor position"`
+    Prev   *uuid.UUID `json:"prev" doc:"Return items before this cursor if provided. If both Next and Prev are provided. Next wins"`
+    Offset *int64     `json:"offset" doc:"Skip number of items to return from the cursor position. Formula for offset is ((page number - 1) * limit). Next 1 page or Prev 1 page should send 0 offset. Next or Prev 2 page should send 1*limit"`
 }
 
 type CursorPaginationResponse struct {
@@ -1118,6 +1124,7 @@ Rules:
 - list-style RPC methods should prefer this shared cursor pagination shape
 - `Next` and `Prev` are opaque UUID cursors from the API consumer point of view
 - `Offset` acts as page size / limit for the current request
+- `Prev` request should reverse the database query result, then in code, reverse again.
 
 ### Route prefix and base path rules
 

@@ -318,6 +318,12 @@ Service layer rules:
 - own business logic
 - own DB work
 - own orchestration across scheduler/queue/runner/storage
+- use Go-Jet query builder for service-layer database queries and mutations; pure raw SQL is forbidden unless the user explicitly approves an exception or Go-Jet cannot express the required operation
+- for service-layer SQL written with Go-Jet, prefer dot import of the generated `internal/db/generated/table` package and dot import of `github.com/go-jet/jet/v2/sqlite` when that keeps query code visually close to SQL
+- for `SELECT` queries, prefer Go-Jet QRM mapping into generated Go-Jet model types instead of manual row scanning into custom mirror structs
+- for dynamic filtering, prefer the Go-Jet FAQ pattern starting from `Bool(true)` and chaining `.AND(...)`
+- for dynamic projection, prefer `ProjectionList` only when projection columns are truly dynamic; otherwise use generated `.AllColumns` directly instead of unnecessary helper wrappers
+- for count queries, prefer `COUNT(...)` in Go-Jet form rather than handwritten raw SQL count strings
 
 ## Data/Codegen Rules
 

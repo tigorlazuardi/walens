@@ -5,10 +5,12 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"fmt"
-	"time"
 
+	"github.com/go-jet/jet/v2/qrm"
+	. "github.com/go-jet/jet/v2/sqlite"
 	"github.com/walens/walens/internal/config"
+	"github.com/walens/walens/internal/db/generated/model"
+	. "github.com/walens/walens/internal/db/generated/table"
 )
 
 // ErrConfigNotFound is returned when the config row does not exist or is effectively empty.
@@ -54,22 +56,21 @@ func (c *PersistedConfig) ApplyBootstrapConfig(cfg *config.Config) {
 // If the config row does not exist or contains empty/blank JSON, it returns
 // ErrConfigNotFound. Use BootstrapDefault to initialize defaults.
 func (s *Service) Load(ctx context.Context) (*PersistedConfig, error) {
-	var value string
-	var updatedAt int64
+	stmt := SELECT(Configs.Value, Configs.UpdatedAt).
+		FROM(Configs).
+		WHERE(Configs.ID.EQ(Int(1)))
 
-	err := s.db.QueryRowContext(ctx,
-		`SELECT value, updated_at FROM configs WHERE id = 1`,
-	).Scan(&value, &updatedAt)
-
-	if err == sql.ErrNoRows {
-		return nil, ErrConfigNotFound
-	}
+	var cfg model.Configs
+	err := stmt.QueryContext(ctx, s.db, &cfg)
 	if err != nil {
-		return nil, fmt.Errorf("query config row: %w", err)
+		if errors.Is(err, qrm.ErrNoRows) {
+			return nil, ErrConfigNotFound
+		}
+		return nil, err
 	}
 
 	// Treat empty or whitespace-only JSON as missing
-	trimmed := []byte(value)
+	trimmed := []byte(cfg.Value)
 	for len(trimmed) > 0 && (trimmed[0] == ' ' || trimmed[0] == '\t' || trimmed[0] == '\n' || trimmed[0] == '\r') {
 		trimmed = trimmed[1:]
 	}
@@ -77,52 +78,10 @@ func (s *Service) Load(ctx context.Context) (*PersistedConfig, error) {
 		return nil, ErrConfigNotFound
 	}
 
-	var cfg PersistedConfig
-	if err := json.Unmarshal([]byte(value), &cfg); err != nil {
-		return nil, fmt.Errorf("unmarshal persisted config: %w", err)
-	}
-
-	return &cfg, nil
-}
-
-// Store atomically replaces the entire persisted config value in the database.
-// This performs a whole-object replacement, not a field-by-field patch.
-// Uses INSERT OR REPLACE so it works whether the row exists or not.
-func (s *Service) Store(ctx context.Context, cfg *PersistedConfig) error {
-	value, err := json.Marshal(cfg)
-	if err != nil {
-		return fmt.Errorf("marshal config for storage: %w", err)
-	}
-
-	updatedAt := time.Now().UnixMilli()
-
-	_, err = s.db.ExecContext(ctx,
-		`INSERT OR REPLACE INTO configs (id, value, updated_at) VALUES (1, ?, ?)`,
-		string(value), updatedAt,
-	)
-	if err != nil {
-		return fmt.Errorf("replace config row: %w", err)
-	}
-
-	return nil
-}
-
-// BootstrapDefault loads the persisted config, or if absent/empty, inserts
-// the provided default config and returns it. This ensures the app always
-// has a valid persisted config after bootstrap.
-func (s *Service) BootstrapDefault(ctx context.Context, defaultCfg *PersistedConfig) (*PersistedConfig, error) {
-	existing, err := s.Load(ctx)
-	if err == nil {
-		return existing, nil
-	}
-	if !errors.Is(err, ErrConfigNotFound) {
+	var persisted PersistedConfig
+	if err := json.Unmarshal([]byte(cfg.Value), &persisted); err != nil {
 		return nil, err
 	}
 
-	// Config row is absent or empty; inject defaults via atomic insert.
-	if err := s.Store(ctx, defaultCfg); err != nil {
-		return nil, fmt.Errorf("bootstrap default config: %w", err)
-	}
-
-	return defaultCfg, nil
+	return &persisted, nil
 }
