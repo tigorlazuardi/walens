@@ -6,12 +6,14 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 	configsroutes "github.com/walens/walens/internal/routes/configs"
+	devsubroutes "github.com/walens/walens/internal/routes/device_subscriptions"
 	devicesroutes "github.com/walens/walens/internal/routes/devices"
 	schedulesroutes "github.com/walens/walens/internal/routes/source_schedules"
 	sourcetypesroutes "github.com/walens/walens/internal/routes/source_types"
 	sourceroutes "github.com/walens/walens/internal/routes/sources"
 	"github.com/walens/walens/internal/scheduler"
 	configssvc "github.com/walens/walens/internal/services/configs"
+	devsubsvc "github.com/walens/walens/internal/services/device_subscriptions"
 	devicessvc "github.com/walens/walens/internal/services/devices"
 	schedulessvc "github.com/walens/walens/internal/services/source_schedules"
 	sourcetypessvc "github.com/walens/walens/internal/services/source_types"
@@ -131,5 +133,31 @@ func RegisterDevicesRoutes(api huma.API, basePath string, db *sql.DB) {
 
 	huma.Register(api, devicesroutes.DeleteDeviceOperation(basePath), func(ctx context.Context, input *devicesroutes.DeleteDeviceInput) (*struct{}, error) {
 		return devicesroutes.DeleteDevice(ctx, input, devicesService)
+	})
+}
+
+// RegisterDeviceSubscriptionsRoutes registers all device_subscriptions RPC routes under /api/v1/device_subscriptions/.
+func RegisterDeviceSubscriptionsRoutes(api huma.API, basePath string, db *sql.DB) {
+	var subService *devsubsvc.Service
+	if db != nil {
+		subService = devsubsvc.NewService(db)
+	} else {
+		subService = devsubsvc.NewService(nil)
+	}
+
+	huma.Register(api, devsubroutes.ListDeviceSubscriptionsOperation(basePath), func(ctx context.Context, input *devsubroutes.ListDeviceSubscriptionsInput) (*devsubroutes.ListDeviceSubscriptionsOutput, error) {
+		return devsubroutes.ListDeviceSubscriptions(ctx, input, subService)
+	})
+
+	huma.Register(api, devsubroutes.CreateDeviceSubscriptionOperation(basePath), func(ctx context.Context, input *devsubroutes.CreateDeviceSubscriptionInput) (*devsubroutes.CreateDeviceSubscriptionOutput, error) {
+		return devsubroutes.CreateDeviceSubscription(ctx, input, subService)
+	})
+
+	huma.Register(api, devsubroutes.UpdateDeviceSubscriptionOperation(basePath), func(ctx context.Context, input *devsubroutes.UpdateDeviceSubscriptionInput) (*devsubroutes.UpdateDeviceSubscriptionOutput, error) {
+		return devsubroutes.UpdateDeviceSubscription(ctx, input, subService)
+	})
+
+	huma.Register(api, devsubroutes.DeleteDeviceSubscriptionOperation(basePath), func(ctx context.Context, input *devsubroutes.DeleteDeviceSubscriptionInput) (*struct{}, error) {
+		return devsubroutes.DeleteDeviceSubscription(ctx, input, subService)
 	})
 }
