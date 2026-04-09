@@ -2,7 +2,6 @@ package device_subscriptions
 
 import (
 	"context"
-	"errors"
 	"path"
 
 	"github.com/danielgtaylor/huma/v2"
@@ -23,7 +22,7 @@ func UpdateDeviceSubscriptionOperation(basePath string) huma.Operation {
 
 // UpdateDeviceSubscriptionInput describes the request body for UpdateDeviceSubscription.
 type UpdateDeviceSubscriptionInput struct {
-	Body subsvc.UpdateSubscriptionInput
+	Body subsvc.UpdateSubscriptionRequest
 }
 
 // UpdateDeviceSubscriptionOutput describes the response body for UpdateDeviceSubscription.
@@ -34,27 +33,12 @@ type UpdateDeviceSubscriptionOutput struct {
 // UpdateDeviceSubscription handles POST /api/v1/device_subscriptions/UpdateDeviceSubscription.
 // Updates an existing device source subscription.
 func UpdateDeviceSubscription(ctx context.Context, input *UpdateDeviceSubscriptionInput, svc *subsvc.Service) (*UpdateDeviceSubscriptionOutput, error) {
-	sub, err := svc.UpdateSubscription(ctx, &input.Body)
+	sub, err := svc.UpdateSubscription(ctx, input.Body)
 	if err != nil {
-		if errors.Is(err, subsvc.ErrDBUnavailable) {
-			return nil, huma.Error503ServiceUnavailable("database unavailable")
-		}
-		if errors.Is(err, subsvc.ErrSubscriptionNotFound) {
-			return nil, huma.Error404NotFound("device subscription not found")
-		}
-		if errors.Is(err, subsvc.ErrDeviceNotFound) {
-			return nil, huma.Error400BadRequest("device not found")
-		}
-		if errors.Is(err, subsvc.ErrSourceNotFound) {
-			return nil, huma.Error400BadRequest("source not found")
-		}
-		if errors.Is(err, subsvc.ErrDuplicateSubscription) {
-			return nil, huma.Error409Conflict("device is already subscribed to this source")
-		}
-		return nil, huma.Error500InternalServerError("failed to update device subscription", err)
+		return nil, err
 	}
 
 	return &UpdateDeviceSubscriptionOutput{
-		Body: *sub,
+		Body: sub,
 	}, nil
 }

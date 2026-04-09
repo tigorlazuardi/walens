@@ -2,7 +2,6 @@ package device_subscriptions
 
 import (
 	"context"
-	"errors"
 	"path"
 
 	"github.com/danielgtaylor/huma/v2"
@@ -23,7 +22,7 @@ func ListDeviceSubscriptionsOperation(basePath string) huma.Operation {
 
 // ListDeviceSubscriptionsInput describes the request body for ListDeviceSubscriptions.
 type ListDeviceSubscriptionsInput struct {
-	Body struct{}
+	Body subsvc.ListSubscriptionsRequest
 }
 
 // ListDeviceSubscriptionsOutput describes the response body for ListDeviceSubscriptions.
@@ -36,19 +35,16 @@ type ListDeviceSubscriptionsOutput struct {
 // ListDeviceSubscriptions handles POST /api/v1/device_subscriptions/ListDeviceSubscriptions.
 // Returns all device source subscription rows.
 func ListDeviceSubscriptions(ctx context.Context, input *ListDeviceSubscriptionsInput, svc *subsvc.Service) (*ListDeviceSubscriptionsOutput, error) {
-	items, err := svc.ListSubscriptions(ctx)
+	resp, err := svc.ListSubscriptions(ctx, input.Body)
 	if err != nil {
-		if errors.Is(err, subsvc.ErrDBUnavailable) {
-			return nil, huma.Error503ServiceUnavailable("database unavailable")
-		}
-		return nil, huma.Error500InternalServerError("failed to list device subscriptions", err)
+		return nil, err
 	}
 
 	return &ListDeviceSubscriptionsOutput{
 		Body: struct {
 			Items []subsvc.SubscriptionRow `json:"items" doc:"List of device source subscriptions."`
 		}{
-			Items: items,
+			Items: resp.Items,
 		},
 	}, nil
 }

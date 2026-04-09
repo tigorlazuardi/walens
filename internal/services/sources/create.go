@@ -3,15 +3,16 @@ package sources
 import (
 	"context"
 	"encoding/json"
-	"fmt"
+	"errors"
 
+	"github.com/danielgtaylor/huma/v2"
 	. "github.com/go-jet/jet/v2/sqlite"
 	"github.com/walens/walens/internal/db/generated/model"
 	. "github.com/walens/walens/internal/db/generated/table"
 	"github.com/walens/walens/internal/dbtypes"
 )
 
-type CreateSourceInput struct {
+type CreateSourceRequest struct {
 	Name        string          `json:"name" doc:"Unique human-readable source name."`
 	SourceType  string          `json:"source_type" doc:"Registered source implementation name (e.g., booru, reddit)."`
 	Params      json.RawMessage `json:"params" doc:"Source-specific configuration as JSON."`
@@ -19,37 +20,44 @@ type CreateSourceInput struct {
 	IsEnabled   bool            `json:"is_enabled" doc:"Whether this source is active."`
 }
 
+type CreateSourceResponse = model.Sources
+
 // CreateSource creates a new source row.
-func (s *Service) CreateSource(ctx context.Context, input *CreateSourceInput) (*SourceRow, error) {
-	if s.db == nil {
-		return nil, ErrDBUnavailable
+func (s *Service) CreateSource(ctx context.Context, req CreateSourceRequest) (CreateSourceResponse, error) {
+	if err := s.validateSourceType(req.SourceType, req.Params); err != nil {
+		if errors.Is(err, ErrRegistryUnavailable) {
+			return CreateSourceResponse{}, huma.Error503ServiceUnavailable("source registry unavailable", err)
+		}
+		if errors.Is(err, ErrInvalidSourceType) {
+			return CreateSourceResponse{}, huma.Error400BadRequest("invalid source type: not registered", err)
+		}
+		if errors.Is(err, ErrInvalidParams) {
+			return CreateSourceResponse{}, huma.Error400BadRequest("invalid params for source type", err)
+		}
+		return CreateSourceResponse{}, huma.Error500InternalServerError("failed to validate source type", err)
 	}
 
-	if err := s.validateSourceType(input.SourceType, input.Params); err != nil {
-		return nil, err
-	}
-
-	duplicateCount, err := s.countSources(ctx, Sources.Name.EQ(String(input.Name)))
+	duplicateCount, err := s.countSources(ctx, Sources.Name.EQ(String(req.Name)))
 	if err != nil {
-		return nil, fmt.Errorf("check duplicate name: %w", err)
+		return CreateSourceResponse{}, huma.Error500InternalServerError("failed to check duplicate source name", err)
 	}
 	if duplicateCount > 0 {
-		return nil, ErrDuplicateSourceName
+		return CreateSourceResponse{}, huma.Error409Conflict("source with this name already exists", ErrDuplicateSourceName)
 	}
 
 	now := dbtypes.NewUnixMilliTimeNow()
 	id, err := dbtypes.NewUUIDV7()
 	if err != nil {
-		return nil, fmt.Errorf("generate UUIDv7: %w", err)
+		return CreateSourceResponse{}, huma.Error500InternalServerError("failed to generate source id", err)
 	}
 
 	row := model.Sources{
 		ID:          &id,
-		Name:        input.Name,
-		SourceType:  input.SourceType,
-		Params:      dbtypes.RawJSON(input.Params),
-		LookupCount: input.LookupCount,
-		IsEnabled:   dbtypes.BoolInt(input.IsEnabled),
+		Name:        req.Name,
+		SourceType:  req.SourceType,
+		Params:      dbtypes.RawJSON(req.Params),
+		LookupCount: req.LookupCount,
+		IsEnabled:   dbtypes.BoolInt(req.IsEnabled),
 		CreatedAt:   now,
 		UpdatedAt:   now,
 	}
@@ -66,8 +74,8 @@ func (s *Service) CreateSource(ctx context.Context, input *CreateSourceInput) (*
 	).MODEL(row)
 
 	if _, err := stmt.ExecContext(ctx, s.db); err != nil {
-		return nil, fmt.Errorf("insert source: %w", err)
+		return CreateSourceResponse{}, huma.Error500InternalServerError("failed to create source", err)
 	}
 
-	return s.GetSource(ctx, id)
+	return s.GetSource(ctx, GetSourceRequest{ID: id})
 }

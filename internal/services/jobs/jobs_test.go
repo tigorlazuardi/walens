@@ -8,9 +8,27 @@ import (
 	"testing"
 	"time"
 
+	"github.com/danielgtaylor/huma/v2"
 	"github.com/walens/walens/internal/dbtypes"
 	_ "modernc.org/sqlite"
 )
+
+func assertHumaErrorStatus(t *testing.T, err error, expectedStatus int) {
+	t.Helper()
+
+	if err == nil {
+		t.Fatalf("expected error with status %d, got nil", expectedStatus)
+	}
+
+	var humaErr *huma.ErrorModel
+	if !errors.As(err, &humaErr) {
+		t.Fatalf("expected *huma.ErrorModel, got %T: %v", err, err)
+	}
+
+	if humaErr.GetStatus() != expectedStatus {
+		t.Fatalf("expected status %d, got %d", expectedStatus, humaErr.GetStatus())
+	}
+}
 
 func openTestDB(t *testing.T) *sql.DB {
 	db, err := sql.Open("sqlite", ":memory:")
@@ -63,7 +81,7 @@ func TestCreateJob(t *testing.T) {
 	ctx := context.Background()
 
 	sourceID, _ := dbtypes.NewUUIDV7()
-	input := &CreateJobInput{
+	input := &CreateJobRequest{
 		JobType:             JobTypeSourceSync,
 		SourceID:            &sourceID,
 		SourceName:          "test-source",
@@ -74,7 +92,7 @@ func TestCreateJob(t *testing.T) {
 		JSONInput:           json.RawMessage(`{"tags":["landscape"]}`),
 	}
 
-	job, err := svc.CreateJob(ctx, input)
+	job, err := svc.CreateJob(ctx, *input)
 	if err != nil {
 		t.Fatalf("CreateJob failed: %v", err)
 	}
@@ -104,16 +122,14 @@ func TestCreateJobInvalidJobType(t *testing.T) {
 	svc := NewService(db)
 	ctx := context.Background()
 
-	input := &CreateJobInput{
+	input := &CreateJobRequest{
 		JobType:     "invalid_type",
 		TriggerKind: TriggerKindManual,
 		RunAfter:    time.Now().UTC(),
 	}
 
-	_, err := svc.CreateJob(ctx, input)
-	if !errors.Is(err, ErrInvalidState) {
-		t.Errorf("expected ErrInvalidState, got: %v", err)
-	}
+	_, err := svc.CreateJob(ctx, *input)
+	assertHumaErrorStatus(t, err, 400)
 }
 
 func TestCreateJobInvalidTriggerKind(t *testing.T) {
@@ -124,16 +140,14 @@ func TestCreateJobInvalidTriggerKind(t *testing.T) {
 	svc := NewService(db)
 	ctx := context.Background()
 
-	input := &CreateJobInput{
+	input := &CreateJobRequest{
 		JobType:     JobTypeSourceSync,
 		TriggerKind: "invalid_trigger",
 		RunAfter:    time.Now().UTC(),
 	}
 
-	_, err := svc.CreateJob(ctx, input)
-	if !errors.Is(err, ErrInvalidState) {
-		t.Errorf("expected ErrInvalidState, got: %v", err)
-	}
+	_, err := svc.CreateJob(ctx, *input)
+	assertHumaErrorStatus(t, err, 400)
 }
 
 func TestGetJob(t *testing.T) {
@@ -145,18 +159,18 @@ func TestGetJob(t *testing.T) {
 	ctx := context.Background()
 
 	// Create a job first
-	input := &CreateJobInput{
+	input := &CreateJobRequest{
 		JobType:     JobTypeSourceDownload,
 		TriggerKind: TriggerKindSchedule,
 		RunAfter:    time.Now().UTC(),
 	}
-	created, err := svc.CreateJob(ctx, input)
+	created, err := svc.CreateJob(ctx, *input)
 	if err != nil {
 		t.Fatalf("CreateJob failed: %v", err)
 	}
 
 	// Get the job
-	job, err := svc.GetJob(ctx, *created.ID)
+	job, err := svc.GetJob(ctx, GetJobRequest{ID: *created.ID})
 	if err != nil {
 		t.Fatalf("GetJob failed: %v", err)
 	}
@@ -179,10 +193,8 @@ func TestGetJobNotFound(t *testing.T) {
 
 	// Try to get non-existent job
 	fakeID, _ := dbtypes.NewUUIDV7()
-	_, err := svc.GetJob(ctx, fakeID)
-	if !errors.Is(err, ErrJobNotFound) {
-		t.Errorf("expected ErrJobNotFound, got: %v", err)
-	}
+	_, err := svc.GetJob(ctx, GetJobRequest{ID: fakeID})
+	assertHumaErrorStatus(t, err, 404)
 }
 
 func TestListJobs(t *testing.T) {
@@ -195,19 +207,19 @@ func TestListJobs(t *testing.T) {
 
 	// Create multiple jobs
 	for i := 0; i < 3; i++ {
-		input := &CreateJobInput{
+		input := &CreateJobRequest{
 			JobType:     JobTypeSourceSync,
 			TriggerKind: TriggerKindManual,
 			RunAfter:    time.Now().UTC(),
 		}
-		_, err := svc.CreateJob(ctx, input)
+		_, err := svc.CreateJob(ctx, *input)
 		if err != nil {
 			t.Fatalf("CreateJob failed: %v", err)
 		}
 	}
 
 	// List all jobs
-	resp, err := svc.ListJobs(ctx, &ListJobsInput{
+	resp, err := svc.ListJobs(ctx, ListJobsRequest{
 		Limit:  10,
 		Offset: 0,
 	})
@@ -234,25 +246,25 @@ func TestListJobsWithFilter(t *testing.T) {
 	// Create jobs with different statuses
 	statuses := []string{StatusQueued, StatusRunning, StatusSucceeded}
 	for _, status := range statuses {
-		input := &CreateJobInput{
+		input := &CreateJobRequest{
 			JobType:     JobTypeSourceSync,
 			TriggerKind: TriggerKindManual,
 			RunAfter:    time.Now().UTC(),
 		}
-		job, _ := svc.CreateJob(ctx, input)
+		job, _ := svc.CreateJob(ctx, *input)
 
 		switch status {
 		case StatusRunning:
-			_, _ = svc.StartJob(ctx, *job.ID)
+			_, _ = svc.StartJob(ctx, StartJobRequest{ID: *job.ID})
 		case StatusSucceeded:
-			_, _ = svc.StartJob(ctx, *job.ID)
-			_, _ = svc.CompleteJob(ctx, *job.ID, nil, nil)
+			_, _ = svc.StartJob(ctx, StartJobRequest{ID: *job.ID})
+			_, _ = svc.CompleteJob(ctx, CompleteJobRequest{ID: *job.ID, Message: nil, JSONResult: nil})
 		}
 	}
 
 	// List only queued jobs
 	queuedStatus := StatusQueued
-	resp, err := svc.ListJobs(ctx, &ListJobsInput{
+	resp, err := svc.ListJobs(ctx, ListJobsRequest{
 		Status: &queuedStatus,
 		Limit:  10,
 		Offset: 0,
@@ -275,15 +287,15 @@ func TestStartJob(t *testing.T) {
 	ctx := context.Background()
 
 	// Create a job
-	input := &CreateJobInput{
+	input := &CreateJobRequest{
 		JobType:     JobTypeSourceSync,
 		TriggerKind: TriggerKindManual,
 		RunAfter:    time.Now().UTC(),
 	}
-	job, _ := svc.CreateJob(ctx, input)
+	job, _ := svc.CreateJob(ctx, *input)
 
 	// Start the job
-	started, err := svc.StartJob(ctx, *job.ID)
+	started, err := svc.StartJob(ctx, StartJobRequest{ID: *job.ID})
 	if err != nil {
 		t.Fatalf("StartJob failed: %v", err)
 	}
@@ -305,20 +317,18 @@ func TestStartJobInvalidTransition(t *testing.T) {
 	ctx := context.Background()
 
 	// Create, start, and complete a job
-	input := &CreateJobInput{
+	input := &CreateJobRequest{
 		JobType:     JobTypeSourceSync,
 		TriggerKind: TriggerKindManual,
 		RunAfter:    time.Now().UTC(),
 	}
-	job, _ := svc.CreateJob(ctx, input)
-	svc.StartJob(ctx, *job.ID)
-	svc.CompleteJob(ctx, *job.ID, nil, nil)
+	job, _ := svc.CreateJob(ctx, *input)
+	svc.StartJob(ctx, StartJobRequest{ID: *job.ID})
+	svc.CompleteJob(ctx, CompleteJobRequest{ID: *job.ID, Message: nil, JSONResult: nil})
 
 	// Try to start completed job
-	_, err := svc.StartJob(ctx, *job.ID)
-	if !errors.Is(err, ErrInvalidTransition) {
-		t.Errorf("expected ErrInvalidTransition, got: %v", err)
-	}
+	_, err := svc.StartJob(ctx, StartJobRequest{ID: *job.ID})
+	assertHumaErrorStatus(t, err, 400)
 }
 
 func TestCompleteJob(t *testing.T) {
@@ -330,18 +340,18 @@ func TestCompleteJob(t *testing.T) {
 	ctx := context.Background()
 
 	// Create and start a job
-	input := &CreateJobInput{
+	input := &CreateJobRequest{
 		JobType:     JobTypeSourceSync,
 		TriggerKind: TriggerKindManual,
 		RunAfter:    time.Now().UTC(),
 	}
-	job, _ := svc.CreateJob(ctx, input)
-	svc.StartJob(ctx, *job.ID)
+	job, _ := svc.CreateJob(ctx, *input)
+	svc.StartJob(ctx, StartJobRequest{ID: *job.ID})
 
 	// Complete the job
 	message := "Job completed successfully"
 	result := json.RawMessage(`{"images_processed": 10}`)
-	completed, err := svc.CompleteJob(ctx, *job.ID, &message, result)
+	completed, err := svc.CompleteJob(ctx, CompleteJobRequest{ID: *job.ID, Message: &message, JSONResult: result})
 	if err != nil {
 		t.Fatalf("CompleteJob failed: %v", err)
 	}
@@ -369,18 +379,18 @@ func TestFailJob(t *testing.T) {
 	ctx := context.Background()
 
 	// Create and start a job
-	input := &CreateJobInput{
+	input := &CreateJobRequest{
 		JobType:     JobTypeSourceSync,
 		TriggerKind: TriggerKindManual,
 		RunAfter:    time.Now().UTC(),
 	}
-	job, _ := svc.CreateJob(ctx, input)
-	svc.StartJob(ctx, *job.ID)
+	job, _ := svc.CreateJob(ctx, *input)
+	svc.StartJob(ctx, StartJobRequest{ID: *job.ID})
 
 	// Fail the job
 	errorMsg := "Network timeout"
 	result := json.RawMessage(`{"error_code": "TIMEOUT"}`)
-	failed, err := svc.FailJob(ctx, *job.ID, errorMsg, result)
+	failed, err := svc.FailJob(ctx, FailJobRequest{ID: *job.ID, ErrorMessage: errorMsg, JSONResult: result})
 	if err != nil {
 		t.Fatalf("FailJob failed: %v", err)
 	}
@@ -402,16 +412,16 @@ func TestCancelJob(t *testing.T) {
 	ctx := context.Background()
 
 	// Create a queued job
-	input := &CreateJobInput{
+	input := &CreateJobRequest{
 		JobType:     JobTypeSourceSync,
 		TriggerKind: TriggerKindManual,
 		RunAfter:    time.Now().UTC(),
 	}
-	job, _ := svc.CreateJob(ctx, input)
+	job, _ := svc.CreateJob(ctx, *input)
 
 	// Cancel the job
 	message := "Cancelled by user"
-	cancelled, err := svc.CancelJob(ctx, *job.ID, &message)
+	cancelled, err := svc.CancelJob(ctx, CancelJobRequest{ID: *job.ID, Message: &message})
 	if err != nil {
 		t.Fatalf("CancelJob failed: %v", err)
 	}
@@ -430,21 +440,21 @@ func TestIncrementJobCounters(t *testing.T) {
 	ctx := context.Background()
 
 	// Create and start a job
-	input := &CreateJobInput{
+	input := &CreateJobRequest{
 		JobType:     JobTypeSourceSync,
 		TriggerKind: TriggerKindManual,
 		RunAfter:    time.Now().UTC(),
 	}
-	job, _ := svc.CreateJob(ctx, input)
-	svc.StartJob(ctx, *job.ID)
+	job, _ := svc.CreateJob(ctx, *input)
+	svc.StartJob(ctx, StartJobRequest{ID: *job.ID})
 
 	// Increment counters
 	downloaded := int64(5)
 	reused := int64(3)
-	updated, err := svc.IncrementJobCounters(ctx, *job.ID, UpdateJobCountersInput{
+	updated, err := svc.IncrementJobCounters(ctx, IncrementJobCountersRequest{ID: *job.ID, Deltas: UpdateJobCountersRequest{
 		DownloadedImageCount: &downloaded,
 		ReusedImageCount:     &reused,
-	})
+	}})
 	if err != nil {
 		t.Fatalf("IncrementJobCounters failed: %v", err)
 	}
@@ -458,9 +468,9 @@ func TestIncrementJobCounters(t *testing.T) {
 
 	// Increment again
 	downloaded2 := int64(2)
-	updated2, err := svc.IncrementJobCounters(ctx, *job.ID, UpdateJobCountersInput{
+	updated2, err := svc.IncrementJobCounters(ctx, IncrementJobCountersRequest{ID: *job.ID, Deltas: UpdateJobCountersRequest{
 		DownloadedImageCount: &downloaded2,
-	})
+	}})
 	if err != nil {
 		t.Fatalf("IncrementJobCounters failed: %v", err)
 	}
@@ -479,21 +489,19 @@ func TestIncrementJobCountersNotRunning(t *testing.T) {
 	ctx := context.Background()
 
 	// Create a queued job (not running)
-	input := &CreateJobInput{
+	input := &CreateJobRequest{
 		JobType:     JobTypeSourceSync,
 		TriggerKind: TriggerKindManual,
 		RunAfter:    time.Now().UTC(),
 	}
-	job, _ := svc.CreateJob(ctx, input)
+	job, _ := svc.CreateJob(ctx, *input)
 
 	// Try to increment counters
 	downloaded := int64(5)
-	_, err := svc.IncrementJobCounters(ctx, *job.ID, UpdateJobCountersInput{
+	_, err := svc.IncrementJobCounters(ctx, IncrementJobCountersRequest{ID: *job.ID, Deltas: UpdateJobCountersRequest{
 		DownloadedImageCount: &downloaded,
-	})
-	if !errors.Is(err, ErrJobNotRunning) {
-		t.Errorf("expected ErrJobNotRunning, got: %v", err)
-	}
+	}})
+	assertHumaErrorStatus(t, err, 400)
 }
 
 func TestRecoverRunningJobs(t *testing.T) {
@@ -506,15 +514,15 @@ func TestRecoverRunningJobs(t *testing.T) {
 
 	// Create jobs in different states
 	for i := 0; i < 2; i++ {
-		input := &CreateJobInput{
+		input := &CreateJobRequest{
 			JobType:     JobTypeSourceSync,
 			TriggerKind: TriggerKindManual,
 			RunAfter:    time.Now().UTC(),
 		}
-		job, _ := svc.CreateJob(ctx, input)
+		job, _ := svc.CreateJob(ctx, *input)
 		if i == 0 {
 			// Start one job
-			svc.StartJob(ctx, *job.ID)
+			svc.StartJob(ctx, StartJobRequest{ID: *job.ID})
 		}
 	}
 
@@ -529,7 +537,7 @@ func TestRecoverRunningJobs(t *testing.T) {
 	}
 
 	// Verify the job is now queued
-	resp, _ := svc.ListJobs(ctx, &ListJobsInput{
+	resp, _ := svc.ListJobs(ctx, ListJobsRequest{
 		Limit: 10, Offset: 0,
 	})
 	for _, job := range resp.Items {
@@ -548,14 +556,14 @@ func TestGetJobsForRecovery(t *testing.T) {
 	ctx := context.Background()
 
 	// Create jobs
-	input := &CreateJobInput{
+	input := &CreateJobRequest{
 		JobType:     JobTypeSourceSync,
 		TriggerKind: TriggerKindManual,
 		RunAfter:    time.Now().UTC(),
 	}
-	queuedJob, _ := svc.CreateJob(ctx, input)
-	runningJob, _ := svc.CreateJob(ctx, input)
-	svc.StartJob(ctx, *runningJob.ID)
+	queuedJob, _ := svc.CreateJob(ctx, *input)
+	runningJob, _ := svc.CreateJob(ctx, *input)
+	svc.StartJob(ctx, StartJobRequest{ID: *runningJob.ID})
 
 	// Get jobs for recovery
 	jobs, err := svc.GetJobsForRecovery(ctx)
@@ -583,25 +591,5 @@ func TestGetJobsForRecovery(t *testing.T) {
 	}
 	if !foundRunning {
 		t.Error("running job not found in recovery list")
-	}
-}
-
-func TestDBUnavailable(t *testing.T) {
-	svc := NewService(nil)
-	ctx := context.Background()
-
-	_, err := svc.CreateJob(ctx, &CreateJobInput{})
-	if !errors.Is(err, ErrDBUnavailable) {
-		t.Errorf("expected ErrDBUnavailable, got: %v", err)
-	}
-
-	_, err = svc.GetJob(ctx, dbtypes.UUID{})
-	if !errors.Is(err, ErrDBUnavailable) {
-		t.Errorf("expected ErrDBUnavailable, got: %v", err)
-	}
-
-	_, err = svc.ListJobs(ctx, &ListJobsInput{})
-	if !errors.Is(err, ErrDBUnavailable) {
-		t.Errorf("expected ErrDBUnavailable, got: %v", err)
 	}
 }

@@ -2,23 +2,26 @@ package devices
 
 import (
 	"context"
-	"fmt"
 
+	"github.com/danielgtaylor/huma/v2"
 	. "github.com/go-jet/jet/v2/sqlite"
 	. "github.com/walens/walens/internal/db/generated/table"
 	"github.com/walens/walens/internal/dbtypes"
 )
 
-func (s *Service) DeleteDevice(ctx context.Context, id dbtypes.UUID) error {
-	if s.db == nil {
-		return ErrDBUnavailable
+type DeleteDeviceRequest struct {
+	ID dbtypes.UUID `json:"id" doc:"unique identifier of the device"`
+}
+
+type DeleteDeviceResponse struct{}
+
+func (s *Service) DeleteDevice(ctx context.Context, req DeleteDeviceRequest) (DeleteDeviceResponse, error) {
+	if _, err := s.GetDevice(ctx, GetDeviceRequest{ID: req.ID}); err != nil {
+		return DeleteDeviceResponse{}, err
 	}
-	if _, err := s.GetDevice(ctx, id); err != nil {
-		return err
-	}
-	stmt := Devices.DELETE().WHERE(Devices.ID.EQ(String(id.UUID.String())))
+	stmt := Devices.DELETE().WHERE(Devices.ID.EQ(String(req.ID.UUID.String())))
 	if _, err := stmt.ExecContext(ctx, s.db); err != nil {
-		return fmt.Errorf("delete device: %w", err)
+		return DeleteDeviceResponse{}, huma.Error500InternalServerError("failed to delete device", err)
 	}
-	return nil
+	return DeleteDeviceResponse{}, nil
 }

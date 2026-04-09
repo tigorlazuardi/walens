@@ -2,14 +2,16 @@ package devices
 
 import (
 	"context"
-	"fmt"
+	"errors"
 
+	"github.com/danielgtaylor/huma/v2"
 	. "github.com/go-jet/jet/v2/sqlite"
+	"github.com/walens/walens/internal/db/generated/model"
 	. "github.com/walens/walens/internal/db/generated/table"
 	"github.com/walens/walens/internal/dbtypes"
 )
 
-type UpdateDeviceInput struct {
+type UpdateDeviceRequest struct {
 	ID                   dbtypes.UUID `json:"id" doc:"Unique device identifier."`
 	Name                 string       `json:"name" doc:"Human-readable device name."`
 	Slug                 string       `json:"slug" doc:"URL-safe device identifier for paths."`
@@ -26,55 +28,69 @@ type UpdateDeviceInput struct {
 	AspectRatioTolerance float64      `json:"aspect_ratio_tolerance" doc:"Absolute aspect ratio tolerance for matching wallpapers (0-1)."`
 }
 
-func (s *Service) UpdateDevice(ctx context.Context, input *UpdateDeviceInput) (*DeviceRow, error) {
-	if s.db == nil {
-		return nil, ErrDBUnavailable
-	}
-	input.Slug = normalizeSlug(input.Slug)
-	createInput := &CreateDeviceInput{
-		Name: input.Name, Slug: input.Slug, ScreenWidth: input.ScreenWidth, ScreenHeight: input.ScreenHeight,
-		MinImageWidth: input.MinImageWidth, MaxImageWidth: input.MaxImageWidth,
-		MinImageHeight: input.MinImageHeight, MaxImageHeight: input.MaxImageHeight,
-		MinFilesize: input.MinFilesize, MaxFilesize: input.MaxFilesize,
-		IsAdultAllowed: input.IsAdultAllowed, IsEnabled: input.IsEnabled, AspectRatioTolerance: input.AspectRatioTolerance,
+type UpdateDeviceResponse = model.Devices
+
+func (s *Service) UpdateDevice(ctx context.Context, req UpdateDeviceRequest) (UpdateDeviceResponse, error) {
+	req.Slug = normalizeSlug(req.Slug)
+	createInput := &CreateDeviceRequest{
+		Name: req.Name, Slug: req.Slug, ScreenWidth: req.ScreenWidth, ScreenHeight: req.ScreenHeight,
+		MinImageWidth: req.MinImageWidth, MaxImageWidth: req.MaxImageWidth,
+		MinImageHeight: req.MinImageHeight, MaxImageHeight: req.MaxImageHeight,
+		MinFilesize: req.MinFilesize, MaxFilesize: req.MaxFilesize,
+		IsAdultAllowed: req.IsAdultAllowed, IsEnabled: req.IsEnabled, AspectRatioTolerance: req.AspectRatioTolerance,
 	}
 	if err := validateDeviceInput(createInput); err != nil {
-		return nil, err
+		if errors.Is(err, ErrInvalidSlug) {
+			return UpdateDeviceResponse{}, huma.Error400BadRequest("invalid slug: must contain only lowercase letters, numbers, and hyphens", err)
+		}
+		if errors.Is(err, ErrInvalidScreenDimensions) {
+			return UpdateDeviceResponse{}, huma.Error400BadRequest("screen width and height must be positive", err)
+		}
+		if errors.Is(err, ErrInvalidImageBounds) {
+			return UpdateDeviceResponse{}, huma.Error400BadRequest("min image dimensions cannot exceed max dimensions", err)
+		}
+		if errors.Is(err, ErrInvalidFilesizeBounds) {
+			return UpdateDeviceResponse{}, huma.Error400BadRequest("min filesize cannot exceed max filesize", err)
+		}
+		if errors.Is(err, ErrInvalidAspectRatioTolerance) {
+			return UpdateDeviceResponse{}, huma.Error400BadRequest("aspect ratio tolerance must be between 0 and 1", err)
+		}
+		return UpdateDeviceResponse{}, huma.Error500InternalServerError("failed to validate device", err)
 	}
-	existing, err := s.GetDevice(ctx, input.ID)
+	existing, err := s.GetDevice(ctx, GetDeviceRequest{ID: req.ID})
 	if err != nil {
-		return nil, err
+		return UpdateDeviceResponse{}, err
 	}
-	duplicateCount, err := s.countDevices(ctx, Devices.Slug.EQ(String(input.Slug)).AND(Devices.ID.NOT_EQ(String(input.ID.UUID.String()))))
+	duplicateCount, err := s.countDevices(ctx, Devices.Slug.EQ(String(req.Slug)).AND(Devices.ID.NOT_EQ(String(req.ID.UUID.String()))))
 	if err != nil {
-		return nil, fmt.Errorf("check duplicate slug: %w", err)
+		return UpdateDeviceResponse{}, huma.Error500InternalServerError("failed to check duplicate device slug", err)
 	}
 	if duplicateCount > 0 {
-		return nil, ErrDuplicateDeviceSlug
+		return UpdateDeviceResponse{}, huma.Error409Conflict("device with this slug already exists", ErrDuplicateDeviceSlug)
 	}
-	updated := *existing
-	updated.Name = input.Name
-	updated.Slug = input.Slug
-	updated.ScreenWidth = input.ScreenWidth
-	updated.ScreenHeight = input.ScreenHeight
-	updated.MinImageWidth = input.MinImageWidth
-	updated.MaxImageWidth = input.MaxImageWidth
-	updated.MinImageHeight = input.MinImageHeight
-	updated.MaxImageHeight = input.MaxImageHeight
-	updated.MinFilesize = input.MinFilesize
-	updated.MaxFilesize = input.MaxFilesize
-	updated.IsAdultAllowed = dbtypes.BoolInt(input.IsAdultAllowed)
-	updated.IsEnabled = dbtypes.BoolInt(input.IsEnabled)
-	updated.AspectRatioTolerance = input.AspectRatioTolerance
+	updated := existing
+	updated.Name = req.Name
+	updated.Slug = req.Slug
+	updated.ScreenWidth = req.ScreenWidth
+	updated.ScreenHeight = req.ScreenHeight
+	updated.MinImageWidth = req.MinImageWidth
+	updated.MaxImageWidth = req.MaxImageWidth
+	updated.MinImageHeight = req.MinImageHeight
+	updated.MaxImageHeight = req.MaxImageHeight
+	updated.MinFilesize = req.MinFilesize
+	updated.MaxFilesize = req.MaxFilesize
+	updated.IsAdultAllowed = dbtypes.BoolInt(req.IsAdultAllowed)
+	updated.IsEnabled = dbtypes.BoolInt(req.IsEnabled)
+	updated.AspectRatioTolerance = req.AspectRatioTolerance
 	updated.UpdatedAt = dbtypes.NewUnixMilliTimeNow()
 	stmt := Devices.UPDATE(
 		Devices.Name, Devices.Slug, Devices.ScreenWidth, Devices.ScreenHeight,
 		Devices.MinImageWidth, Devices.MaxImageWidth, Devices.MinImageHeight, Devices.MaxImageHeight,
 		Devices.MinFilesize, Devices.MaxFilesize, Devices.IsAdultAllowed, Devices.IsEnabled,
 		Devices.AspectRatioTolerance, Devices.UpdatedAt,
-	).MODEL(updated).WHERE(Devices.ID.EQ(String(input.ID.UUID.String())))
+	).MODEL(updated).WHERE(Devices.ID.EQ(String(req.ID.UUID.String())))
 	if _, err := stmt.ExecContext(ctx, s.db); err != nil {
-		return nil, fmt.Errorf("update device: %w", err)
+		return UpdateDeviceResponse{}, huma.Error500InternalServerError("failed to update device", err)
 	}
-	return s.GetDevice(ctx, input.ID)
+	return s.GetDevice(ctx, GetDeviceRequest{ID: req.ID})
 }

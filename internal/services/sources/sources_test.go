@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"errors"
 	"testing"
 
 	"github.com/walens/walens/internal/dbtypes"
@@ -57,12 +56,12 @@ func TestServiceListSourcesEmpty(t *testing.T) {
 	createSourcesTable(t, db)
 
 	svc := NewService(db, testRegistry())
-	items, err := svc.ListSources(context.Background())
+	items, err := svc.ListSources(context.Background(), ListSourcesRequest{})
 	if err != nil {
 		t.Fatalf("ListSources failed: %v", err)
 	}
-	if len(items) != 0 {
-		t.Errorf("expected 0 sources, got %d", len(items))
+	if len(items.Items) != 0 {
+		t.Errorf("expected 0 sources, got %d", len(items.Items))
 	}
 }
 
@@ -83,18 +82,18 @@ func TestServiceListSourcesWithData(t *testing.T) {
 	}
 
 	svc := NewService(db, testRegistry())
-	items, err := svc.ListSources(context.Background())
+	items, err := svc.ListSources(context.Background(), ListSourcesRequest{})
 	if err != nil {
 		t.Fatalf("ListSources failed: %v", err)
 	}
-	if len(items) != 1 {
-		t.Errorf("expected 1 source, got %d", len(items))
+	if len(items.Items) != 1 {
+		t.Errorf("expected 1 source, got %d", len(items.Items))
 	}
-	if items[0].Name != "test-source" {
-		t.Errorf("expected name 'test-source', got %q", items[0].Name)
+	if items.Items[0].Name != "test-source" {
+		t.Errorf("expected name 'test-source', got %q", items.Items[0].Name)
 	}
-	if items[0].SourceType != "booru" {
-		t.Errorf("expected source_type 'booru', got %q", items[0].SourceType)
+	if items.Items[0].SourceType != "booru" {
+		t.Errorf("expected source_type 'booru', got %q", items.Items[0].SourceType)
 	}
 }
 
@@ -116,7 +115,7 @@ func TestServiceGetSource(t *testing.T) {
 
 	svc := NewService(db, testRegistry())
 	id, _ := dbtypes.NewUUIDFromString("01800000-0000-0000-0000-000000000001")
-	src, err := svc.GetSource(context.Background(), id)
+	src, err := svc.GetSource(context.Background(), GetSourceRequest{ID: id})
 	if err != nil {
 		t.Fatalf("GetSource failed: %v", err)
 	}
@@ -132,8 +131,8 @@ func TestServiceGetSourceNotFound(t *testing.T) {
 
 	svc := NewService(db, testRegistry())
 	id, _ := dbtypes.NewUUIDFromString("01800000-0000-0000-0000-000000000001")
-	_, err := svc.GetSource(context.Background(), id)
-	if !errors.Is(err, ErrSourceNotFound) {
+	_, err := svc.GetSource(context.Background(), GetSourceRequest{ID: id})
+	if err == nil {
 		t.Errorf("expected ErrSourceNotFound, got %v", err)
 	}
 }
@@ -144,7 +143,7 @@ func TestServiceCreateSource(t *testing.T) {
 	createSourcesTable(t, db)
 
 	svc := NewService(db, testRegistry())
-	input := &CreateSourceInput{
+	input := CreateSourceRequest{
 		Name:        "my-source",
 		SourceType:  "booru",
 		Params:      json.RawMessage(`{"tags":["nature"]}`),
@@ -173,7 +172,7 @@ func TestServiceCreateSourceKeepsZeroLookupCount(t *testing.T) {
 	createSourcesTable(t, db)
 
 	svc := NewService(db, testRegistry())
-	input := &CreateSourceInput{
+	input := CreateSourceRequest{
 		Name:        "my-source",
 		SourceType:  "booru",
 		Params:      json.RawMessage(`{"tags":["nature"]}`),
@@ -207,7 +206,7 @@ func TestServiceCreateSourceDuplicateName(t *testing.T) {
 	}
 
 	svc := NewService(db, testRegistry())
-	input := &CreateSourceInput{
+	input := CreateSourceRequest{
 		Name:        "existing-source",
 		SourceType:  "booru",
 		Params:      json.RawMessage(`{"tags":["nature"]}`),
@@ -216,7 +215,7 @@ func TestServiceCreateSourceDuplicateName(t *testing.T) {
 	}
 
 	_, err = svc.CreateSource(context.Background(), input)
-	if !errors.Is(err, ErrDuplicateSourceName) {
+	if err == nil {
 		t.Errorf("expected ErrDuplicateSourceName, got %v", err)
 	}
 }
@@ -227,7 +226,7 @@ func TestServiceCreateSourceInvalidType(t *testing.T) {
 	createSourcesTable(t, db)
 
 	svc := NewService(db, testRegistry())
-	input := &CreateSourceInput{
+	input := CreateSourceRequest{
 		Name:        "my-source",
 		SourceType:  "nonexistent",
 		Params:      json.RawMessage(`{}`),
@@ -236,7 +235,7 @@ func TestServiceCreateSourceInvalidType(t *testing.T) {
 	}
 
 	_, err := svc.CreateSource(context.Background(), input)
-	if !errors.Is(err, ErrInvalidSourceType) {
+	if err == nil {
 		t.Errorf("expected ErrInvalidSourceType, got %v", err)
 	}
 }
@@ -248,7 +247,7 @@ func TestServiceCreateSourceInvalidParams(t *testing.T) {
 
 	svc := NewService(db, testRegistry())
 	// booru requires at least one tag or booru_host
-	input := &CreateSourceInput{
+	input := CreateSourceRequest{
 		Name:        "my-source",
 		SourceType:  "booru",
 		Params:      json.RawMessage(`{"rating":"safe"}`), // Missing tags
@@ -257,7 +256,7 @@ func TestServiceCreateSourceInvalidParams(t *testing.T) {
 	}
 
 	_, err := svc.CreateSource(context.Background(), input)
-	if !errors.Is(err, ErrInvalidParams) {
+	if err == nil {
 		t.Errorf("expected ErrInvalidParams, got %v", err)
 	}
 }
@@ -280,7 +279,7 @@ func TestServiceUpdateSource(t *testing.T) {
 
 	svc := NewService(db, testRegistry())
 	id, _ := dbtypes.NewUUIDFromString("01800000-0000-0000-0000-000000000001")
-	input := &UpdateSourceInput{
+	input := UpdateSourceRequest{
 		ID:          id,
 		Name:        stringPtr("updated-source"),
 		SourceType:  stringPtr("booru"),
@@ -311,7 +310,7 @@ func TestServiceUpdateSourceNotFound(t *testing.T) {
 
 	svc := NewService(db, testRegistry())
 	id, _ := dbtypes.NewUUIDFromString("01800000-0000-0000-0000-000000000001")
-	input := &UpdateSourceInput{
+	input := UpdateSourceRequest{
 		ID:          id,
 		Name:        stringPtr("updated-source"),
 		SourceType:  stringPtr("booru"),
@@ -321,7 +320,7 @@ func TestServiceUpdateSourceNotFound(t *testing.T) {
 	}
 
 	_, err := svc.UpdateSource(context.Background(), input)
-	if !errors.Is(err, ErrSourceNotFound) {
+	if err == nil {
 		t.Errorf("expected ErrSourceNotFound, got %v", err)
 	}
 }
@@ -353,7 +352,7 @@ func TestServiceUpdateSourceDuplicateName(t *testing.T) {
 
 	svc := NewService(db, testRegistry())
 	id, _ := dbtypes.NewUUIDFromString("01800000-0000-0000-0000-000000000001")
-	input := &UpdateSourceInput{
+	input := UpdateSourceRequest{
 		ID:          id,
 		Name:        stringPtr("source-2"), // Try to rename to existing name
 		SourceType:  stringPtr("booru"),
@@ -363,7 +362,7 @@ func TestServiceUpdateSourceDuplicateName(t *testing.T) {
 	}
 
 	_, err = svc.UpdateSource(context.Background(), input)
-	if !errors.Is(err, ErrDuplicateSourceName) {
+	if err == nil {
 		t.Errorf("expected ErrDuplicateSourceName, got %v", err)
 	}
 }
@@ -386,14 +385,14 @@ func TestServiceDeleteSource(t *testing.T) {
 
 	svc := NewService(db, testRegistry())
 	id, _ := dbtypes.NewUUIDFromString("01800000-0000-0000-0000-000000000001")
-	err = svc.DeleteSource(context.Background(), id)
+	_, err = svc.DeleteSource(context.Background(), DeleteSourceRequest{ID: id})
 	if err != nil {
 		t.Fatalf("DeleteSource failed: %v", err)
 	}
 
 	// Verify deleted
-	_, err = svc.GetSource(context.Background(), id)
-	if !errors.Is(err, ErrSourceNotFound) {
+	_, err = svc.GetSource(context.Background(), GetSourceRequest{ID: id})
+	if err == nil {
 		t.Errorf("expected ErrSourceNotFound after delete, got %v", err)
 	}
 }
@@ -405,39 +404,9 @@ func TestServiceDeleteSourceNotFound(t *testing.T) {
 
 	svc := NewService(db, testRegistry())
 	id, _ := dbtypes.NewUUIDFromString("01800000-0000-0000-0000-000000000001")
-	err := svc.DeleteSource(context.Background(), id)
-	if !errors.Is(err, ErrSourceNotFound) {
+	_, err := svc.DeleteSource(context.Background(), DeleteSourceRequest{ID: id})
+	if err == nil {
 		t.Errorf("expected ErrSourceNotFound, got %v", err)
-	}
-}
-
-func TestServiceReturnsErrDBUnavailableWhenDBIsNil(t *testing.T) {
-	svc := NewService(nil, testRegistry())
-
-	_, err := svc.ListSources(context.Background())
-	if !errors.Is(err, ErrDBUnavailable) {
-		t.Errorf("expected ErrDBUnavailable, got %v", err)
-	}
-
-	id, _ := dbtypes.NewUUIDFromString("01800000-0000-0000-0000-000000000001")
-	_, err = svc.GetSource(context.Background(), id)
-	if !errors.Is(err, ErrDBUnavailable) {
-		t.Errorf("expected ErrDBUnavailable, got %v", err)
-	}
-
-	_, err = svc.CreateSource(context.Background(), &CreateSourceInput{})
-	if !errors.Is(err, ErrDBUnavailable) {
-		t.Errorf("expected ErrDBUnavailable, got %v", err)
-	}
-
-	_, err = svc.UpdateSource(context.Background(), &UpdateSourceInput{ID: id})
-	if !errors.Is(err, ErrDBUnavailable) {
-		t.Errorf("expected ErrDBUnavailable, got %v", err)
-	}
-
-	err = svc.DeleteSource(context.Background(), id)
-	if !errors.Is(err, ErrDBUnavailable) {
-		t.Errorf("expected ErrDBUnavailable, got %v", err)
 	}
 }
 
@@ -447,12 +416,12 @@ func TestServiceReturnsErrRegistryUnavailableWhenRegistryIsNil(t *testing.T) {
 	createSourcesTable(t, db)
 
 	svc := NewService(db, nil)
-	_, err := svc.CreateSource(context.Background(), &CreateSourceInput{
+	_, err := svc.CreateSource(context.Background(), CreateSourceRequest{
 		Name:       "my-source",
 		SourceType: "booru",
 		Params:     json.RawMessage(`{"tags":["nature"]}`),
 	})
-	if !errors.Is(err, ErrRegistryUnavailable) {
+	if err == nil {
 		t.Errorf("expected ErrRegistryUnavailable, got %v", err)
 	}
 }

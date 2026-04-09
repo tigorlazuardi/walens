@@ -2,7 +2,6 @@ package sources
 
 import (
 	"context"
-	"errors"
 	"path"
 
 	"github.com/danielgtaylor/huma/v2"
@@ -23,7 +22,7 @@ func CreateSourceOperation(basePath string) huma.Operation {
 
 // CreateSourceInput describes the request body for CreateSource.
 type CreateSourceInput struct {
-	Body sourcesvc.CreateSourceInput
+	Body sourcesvc.CreateSourceRequest
 }
 
 // CreateSourceOutput describes the response body for CreateSource.
@@ -34,27 +33,12 @@ type CreateSourceOutput struct {
 // CreateSource handles POST /api/v1/sources/CreateSource.
 // Creates a new configured source row.
 func CreateSource(ctx context.Context, input *CreateSourceInput, svc *sourcesvc.Service) (*CreateSourceOutput, error) {
-	src, err := svc.CreateSource(ctx, &input.Body)
+	src, err := svc.CreateSource(ctx, input.Body)
 	if err != nil {
-		if errors.Is(err, sourcesvc.ErrDBUnavailable) {
-			return nil, huma.Error503ServiceUnavailable("database unavailable")
-		}
-		if errors.Is(err, sourcesvc.ErrRegistryUnavailable) {
-			return nil, huma.Error503ServiceUnavailable("source registry unavailable")
-		}
-		if errors.Is(err, sourcesvc.ErrDuplicateSourceName) {
-			return nil, huma.Error409Conflict("source with this name already exists")
-		}
-		if errors.Is(err, sourcesvc.ErrInvalidSourceType) {
-			return nil, huma.Error400BadRequest("invalid source type: not registered")
-		}
-		if errors.Is(err, sourcesvc.ErrInvalidParams) {
-			return nil, huma.Error400BadRequest("invalid params for source type", err)
-		}
-		return nil, huma.Error500InternalServerError("failed to create source", err)
+		return nil, err
 	}
 
 	return &CreateSourceOutput{
-		Body: *src,
+		Body: src,
 	}, nil
 }

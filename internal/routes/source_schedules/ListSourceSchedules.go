@@ -2,7 +2,6 @@ package source_schedules
 
 import (
 	"context"
-	"errors"
 	"path"
 
 	"github.com/danielgtaylor/huma/v2"
@@ -23,7 +22,7 @@ func ListSourceSchedulesOperation(basePath string) huma.Operation {
 
 // ListSourceSchedulesInput describes the request body for ListSourceSchedules.
 type ListSourceSchedulesInput struct {
-	Body struct{}
+	Body schedulesvc.ListSchedulesRequest
 }
 
 // ListSourceSchedulesOutput describes the response body for ListSourceSchedules.
@@ -36,19 +35,16 @@ type ListSourceSchedulesOutput struct {
 // ListSourceSchedules handles POST /api/v1/source_schedules/ListSourceSchedules.
 // Returns all source schedule rows.
 func ListSourceSchedules(ctx context.Context, input *ListSourceSchedulesInput, svc *schedulesvc.Service) (*ListSourceSchedulesOutput, error) {
-	items, err := svc.ListSchedules(ctx)
+	resp, err := svc.ListSchedules(ctx, input.Body)
 	if err != nil {
-		if errors.Is(err, schedulesvc.ErrDBUnavailable) {
-			return nil, huma.Error503ServiceUnavailable("database unavailable")
-		}
-		return nil, huma.Error500InternalServerError("failed to list source schedules", err)
+		return nil, err
 	}
 
 	return &ListSourceSchedulesOutput{
 		Body: struct {
 			Items []schedulesvc.ScheduleRow `json:"items" doc:"List of source schedules."`
 		}{
-			Items: items,
+			Items: resp.Items,
 		},
 	}, nil
 }

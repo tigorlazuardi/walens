@@ -14,10 +14,6 @@ import (
 
 // GetJobsForRecovery retrieves queued and running jobs using QRM.
 func (s *Service) GetJobsForRecovery(ctx context.Context) ([]model.Jobs, error) {
-	if s.db == nil {
-		return nil, ErrDBUnavailable
-	}
-
 	statuses := []Expression{String(StatusQueued), String(StatusRunning)}
 	var jobs []model.Jobs
 
@@ -38,10 +34,6 @@ func (s *Service) GetJobsForRecovery(ctx context.Context) ([]model.Jobs, error) 
 
 // RecoverRunningJobs resets running jobs to queued for reprocessing.
 func (s *Service) RecoverRunningJobs(ctx context.Context) (int64, error) {
-	if s.db == nil {
-		return 0, ErrDBUnavailable
-	}
-
 	updated := model.Jobs{
 		Status:     StatusQueued,
 		StartedAt:  nil,
@@ -73,9 +65,6 @@ func (s *Service) RecoverRunningJobs(ctx context.Context) (int64, error) {
 
 // MarkJobsForRecovery marks interrupted jobs with trigger_kind=recovery.
 func (s *Service) MarkJobsForRecovery(ctx context.Context, jobIDs []dbtypes.UUID) (int64, error) {
-	if s.db == nil {
-		return 0, ErrDBUnavailable
-	}
 	if len(jobIDs) == 0 {
 		return 0, nil
 	}
@@ -112,10 +101,6 @@ func (s *Service) MarkJobsForRecovery(ctx context.Context, jobIDs []dbtypes.UUID
 
 // GetRecentJobs retrieves recent jobs for a source using QRM.
 func (s *Service) GetRecentJobs(ctx context.Context, sourceID dbtypes.UUID, limit int) ([]model.Jobs, error) {
-	if s.db == nil {
-		return nil, ErrDBUnavailable
-	}
-
 	var jobs []model.Jobs
 	stmt := SELECT(Jobs.AllColumns).
 		FROM(Jobs).

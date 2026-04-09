@@ -2,7 +2,6 @@ package sources
 
 import (
 	"context"
-	"errors"
 	"path"
 
 	"github.com/danielgtaylor/huma/v2"
@@ -23,7 +22,7 @@ func ListSourcesOperation(basePath string) huma.Operation {
 
 // ListSourcesInput describes the request body for ListSources.
 type ListSourcesInput struct {
-	Body struct{}
+	Body sourcesvc.ListSourcesRequest
 }
 
 // ListSourcesOutput describes the response body for ListSources.
@@ -36,19 +35,16 @@ type ListSourcesOutput struct {
 // ListSources handles POST /api/v1/sources/ListSources.
 // Returns all configured source rows.
 func ListSources(ctx context.Context, input *ListSourcesInput, svc *sourcesvc.Service) (*ListSourcesOutput, error) {
-	items, err := svc.ListSources(ctx)
+	resp, err := svc.ListSources(ctx, input.Body)
 	if err != nil {
-		if errors.Is(err, sourcesvc.ErrDBUnavailable) {
-			return nil, huma.Error503ServiceUnavailable("database unavailable")
-		}
-		return nil, huma.Error500InternalServerError("failed to list sources", err)
+		return nil, err
 	}
 
 	return &ListSourcesOutput{
 		Body: struct {
 			Items []sourcesvc.SourceRow `json:"items" doc:"List of configured sources."`
 		}{
-			Items: items,
+			Items: resp.Items,
 		},
 	}, nil
 }

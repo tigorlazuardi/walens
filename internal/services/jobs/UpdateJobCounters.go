@@ -2,44 +2,43 @@ package jobs
 
 import (
 	"context"
-	"fmt"
 
+	"github.com/danielgtaylor/huma/v2"
 	. "github.com/go-jet/jet/v2/sqlite"
-	"github.com/walens/walens/internal/db/generated/model"
 	. "github.com/walens/walens/internal/db/generated/table"
 	"github.com/walens/walens/internal/dbtypes"
 )
 
 // IncrementJobCounters atomically increments job counters using MODEL update semantics.
-func (s *Service) IncrementJobCounters(ctx context.Context, id dbtypes.UUID, deltas UpdateJobCountersInput) (*model.Jobs, error) {
-	job, err := s.GetJob(ctx, id)
+func (s *Service) IncrementJobCounters(ctx context.Context, req IncrementJobCountersRequest) (JobResponse, error) {
+	job, err := s.GetJob(ctx, GetJobRequest{ID: req.ID})
 	if err != nil {
-		return nil, err
+		return JobResponse{}, err
 	}
 	if job.Status != StatusRunning {
-		return nil, ErrJobNotRunning
+		return JobResponse{}, huma.Error400BadRequest("job is not running", ErrJobNotRunning)
 	}
 
-	updated := *job
+	updated := job
 	updated.UpdatedAt = dbtypes.NewUnixMilliTimeNow()
 
-	if deltas.DownloadedImageCount != nil {
-		updated.DownloadedImageCount += *deltas.DownloadedImageCount
+	if req.Deltas.DownloadedImageCount != nil {
+		updated.DownloadedImageCount += *req.Deltas.DownloadedImageCount
 	}
-	if deltas.ReusedImageCount != nil {
-		updated.ReusedImageCount += *deltas.ReusedImageCount
+	if req.Deltas.ReusedImageCount != nil {
+		updated.ReusedImageCount += *req.Deltas.ReusedImageCount
 	}
-	if deltas.HardlinkedImageCount != nil {
-		updated.HardlinkedImageCount += *deltas.HardlinkedImageCount
+	if req.Deltas.HardlinkedImageCount != nil {
+		updated.HardlinkedImageCount += *req.Deltas.HardlinkedImageCount
 	}
-	if deltas.CopiedImageCount != nil {
-		updated.CopiedImageCount += *deltas.CopiedImageCount
+	if req.Deltas.CopiedImageCount != nil {
+		updated.CopiedImageCount += *req.Deltas.CopiedImageCount
 	}
-	if deltas.StoredImageCount != nil {
-		updated.StoredImageCount += *deltas.StoredImageCount
+	if req.Deltas.StoredImageCount != nil {
+		updated.StoredImageCount += *req.Deltas.StoredImageCount
 	}
-	if deltas.SkippedImageCount != nil {
-		updated.SkippedImageCount += *deltas.SkippedImageCount
+	if req.Deltas.SkippedImageCount != nil {
+		updated.SkippedImageCount += *req.Deltas.SkippedImageCount
 	}
 
 	stmt := Jobs.UPDATE(
@@ -51,49 +50,49 @@ func (s *Service) IncrementJobCounters(ctx context.Context, id dbtypes.UUID, del
 		Jobs.SkippedImageCount,
 		Jobs.UpdatedAt,
 	).MODEL(updated).WHERE(
-		Jobs.ID.EQ(String(id.UUID.String())),
+		Jobs.ID.EQ(String(req.ID.UUID.String())),
 	)
 
 	if _, err := stmt.ExecContext(ctx, s.db); err != nil {
-		return nil, fmt.Errorf("increment job counters: %w", err)
+		return JobResponse{}, huma.Error500InternalServerError("failed to increment job counters", err)
 	}
 
-	return s.GetJob(ctx, id)
+	return s.GetJob(ctx, GetJobRequest{ID: req.ID})
 }
 
 // SetJobMessage updates the informational message for a job.
-func (s *Service) SetJobMessage(ctx context.Context, id dbtypes.UUID, message *string) (*model.Jobs, error) {
-	job, err := s.GetJob(ctx, id)
+func (s *Service) SetJobMessage(ctx context.Context, req SetJobMessageRequest) (JobResponse, error) {
+	job, err := s.GetJob(ctx, GetJobRequest{ID: req.ID})
 	if err != nil {
-		return nil, err
+		return JobResponse{}, err
 	}
 
-	updated := *job
-	updated.Message = message
+	updated := job
+	updated.Message = req.Message
 	updated.UpdatedAt = dbtypes.NewUnixMilliTimeNow()
 
 	stmt := Jobs.UPDATE(Jobs.Message, Jobs.UpdatedAt).MODEL(updated).WHERE(
-		Jobs.ID.EQ(String(id.UUID.String())),
+		Jobs.ID.EQ(String(req.ID.UUID.String())),
 	)
 
 	if _, err := stmt.ExecContext(ctx, s.db); err != nil {
-		return nil, fmt.Errorf("set job message: %w", err)
+		return JobResponse{}, huma.Error500InternalServerError("failed to set job message", err)
 	}
 
-	return s.GetJob(ctx, id)
+	return s.GetJob(ctx, GetJobRequest{ID: req.ID})
 }
 
 // SetJobResult sets the job result metadata and optional message.
-func (s *Service) SetJobResult(ctx context.Context, input *SetJobResultInput) (*model.Jobs, error) {
-	job, err := s.GetJob(ctx, input.ID)
+func (s *Service) SetJobResult(ctx context.Context, req SetJobResultRequest) (JobResponse, error) {
+	job, err := s.GetJob(ctx, GetJobRequest{ID: req.ID})
 	if err != nil {
-		return nil, err
+		return JobResponse{}, err
 	}
 
-	updated := *job
-	updated.Message = input.Message
-	updated.ErrorMessage = input.ErrorMessage
-	updated.JSONResult = ensureJSON(input.JSONResult)
+	updated := job
+	updated.Message = req.Message
+	updated.ErrorMessage = req.ErrorMessage
+	updated.JSONResult = ensureJSON(req.JSONResult)
 	updated.UpdatedAt = dbtypes.NewUnixMilliTimeNow()
 
 	stmt := Jobs.UPDATE(
@@ -102,12 +101,12 @@ func (s *Service) SetJobResult(ctx context.Context, input *SetJobResultInput) (*
 		Jobs.JSONResult,
 		Jobs.UpdatedAt,
 	).MODEL(updated).WHERE(
-		Jobs.ID.EQ(String(input.ID.UUID.String())),
+		Jobs.ID.EQ(String(req.ID.UUID.String())),
 	)
 
 	if _, err := stmt.ExecContext(ctx, s.db); err != nil {
-		return nil, fmt.Errorf("set job result: %w", err)
+		return JobResponse{}, huma.Error500InternalServerError("failed to set job result", err)
 	}
 
-	return s.GetJob(ctx, input.ID)
+	return s.GetJob(ctx, GetJobRequest{ID: req.ID})
 }

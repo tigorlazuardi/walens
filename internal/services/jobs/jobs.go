@@ -36,15 +36,16 @@ const (
 
 // Errors.
 var (
-	ErrDBUnavailable     = errors.New("database unavailable")
 	ErrJobNotFound       = errors.New("job not found")
 	ErrInvalidState      = errors.New("invalid job state")
 	ErrInvalidTransition = errors.New("invalid state transition")
 	ErrJobNotRunning     = errors.New("job is not running")
 )
 
-// CreateJobInput contains the fields needed to create a new job.
-type CreateJobInput struct {
+type JobResponse = model.Jobs
+
+// CreateJobRequest contains the fields needed to create a new job.
+type CreateJobRequest struct {
 	JobType             string          `json:"job_type" doc:"Job type: source_sync or source_download."`
 	SourceID            *dbtypes.UUID   `json:"source_id,omitempty" doc:"Reference to source this job is for."`
 	SourceName          string          `json:"source_name" doc:"Denormalized source name for job history."`
@@ -55,14 +56,14 @@ type CreateJobInput struct {
 	JSONInput           json.RawMessage `json:"json_input" doc:"Job input parameters as JSON."`
 }
 
-// UpdateJobStateInput contains fields for updating job state.
-type UpdateJobStateInput struct {
+// UpdateJobStateRequest contains fields for updating job state.
+type UpdateJobStateRequest struct {
 	ID     dbtypes.UUID `json:"id" doc:"Job ID."`
 	Status string       `json:"status" doc:"New status."`
 }
 
-// UpdateJobCountersInput contains fields for updating job counters.
-type UpdateJobCountersInput struct {
+// UpdateJobCountersRequest contains fields for updating job counters.
+type UpdateJobCountersRequest struct {
 	ID                   dbtypes.UUID `json:"id" doc:"Job ID."`
 	DownloadedImageCount *int64       `json:"downloaded_image_count,omitempty" doc:"Delta to add to downloaded count."`
 	ReusedImageCount     *int64       `json:"reused_image_count,omitempty" doc:"Delta to add to reused count."`
@@ -72,16 +73,16 @@ type UpdateJobCountersInput struct {
 	SkippedImageCount    *int64       `json:"skipped_image_count,omitempty" doc:"Delta to add to skipped count."`
 }
 
-// SetJobResultInput contains fields for setting job result.
-type SetJobResultInput struct {
+// SetJobResultRequest contains fields for setting job result.
+type SetJobResultRequest struct {
 	ID           dbtypes.UUID    `json:"id" doc:"Job ID."`
 	Message      *string         `json:"message,omitempty" doc:"Informational message about the job result."`
 	ErrorMessage *string         `json:"error_message,omitempty" doc:"Error message if the job failed."`
 	JSONResult   json.RawMessage `json:"json_result,omitempty" doc:"Job result metadata as JSON."`
 }
 
-// ListJobsInput contains filters for listing jobs.
-type ListJobsInput struct {
+// ListJobsRequest contains filters for listing jobs.
+type ListJobsRequest struct {
 	Status      *string       `json:"status,omitempty" doc:"Filter by status."`
 	JobType     *string       `json:"job_type,omitempty" doc:"Filter by job type."`
 	SourceID    *dbtypes.UUID `json:"source_id,omitempty" doc:"Filter by source ID."`
@@ -94,6 +95,41 @@ type ListJobsInput struct {
 type ListJobsResponse struct {
 	Items []model.Jobs `json:"items" doc:"List of jobs."`
 	Total int64        `json:"total" doc:"Total number of jobs matching filters."`
+}
+
+type GetJobRequest struct {
+	ID dbtypes.UUID `json:"id" doc:"Job ID."`
+}
+
+type StartJobRequest struct {
+	ID dbtypes.UUID `json:"id" doc:"Job ID."`
+}
+
+type CompleteJobRequest struct {
+	ID         dbtypes.UUID    `json:"id" doc:"Job ID."`
+	Message    *string         `json:"message,omitempty" doc:"Informational message about completion."`
+	JSONResult json.RawMessage `json:"json_result,omitempty" doc:"Job result metadata as JSON."`
+}
+
+type FailJobRequest struct {
+	ID           dbtypes.UUID    `json:"id" doc:"Job ID."`
+	ErrorMessage string          `json:"error_message" doc:"Error message for failed jobs."`
+	JSONResult   json.RawMessage `json:"json_result,omitempty" doc:"Job result metadata as JSON."`
+}
+
+type CancelJobRequest struct {
+	ID      dbtypes.UUID `json:"id" doc:"Job ID."`
+	Message *string      `json:"message,omitempty" doc:"Cancellation message."`
+}
+
+type IncrementJobCountersRequest struct {
+	ID     dbtypes.UUID             `json:"id" doc:"Job ID."`
+	Deltas UpdateJobCountersRequest `json:"deltas" doc:"Counter deltas to apply."`
+}
+
+type SetJobMessageRequest struct {
+	ID      dbtypes.UUID `json:"id" doc:"Job ID."`
+	Message *string      `json:"message,omitempty" doc:"Informational message for the job."`
 }
 
 // Service provides job persistence and state management.

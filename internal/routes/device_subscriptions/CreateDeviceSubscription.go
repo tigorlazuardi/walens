@@ -2,7 +2,6 @@ package device_subscriptions
 
 import (
 	"context"
-	"errors"
 	"path"
 
 	"github.com/danielgtaylor/huma/v2"
@@ -23,7 +22,7 @@ func CreateDeviceSubscriptionOperation(basePath string) huma.Operation {
 
 // CreateDeviceSubscriptionInput describes the request body for CreateDeviceSubscription.
 type CreateDeviceSubscriptionInput struct {
-	Body subsvc.CreateSubscriptionInput
+	Body subsvc.CreateSubscriptionRequest
 }
 
 // CreateDeviceSubscriptionOutput describes the response body for CreateDeviceSubscription.
@@ -34,24 +33,12 @@ type CreateDeviceSubscriptionOutput struct {
 // CreateDeviceSubscription handles POST /api/v1/device_subscriptions/CreateDeviceSubscription.
 // Creates a new device source subscription.
 func CreateDeviceSubscription(ctx context.Context, input *CreateDeviceSubscriptionInput, svc *subsvc.Service) (*CreateDeviceSubscriptionOutput, error) {
-	sub, err := svc.CreateSubscription(ctx, &input.Body)
+	sub, err := svc.CreateSubscription(ctx, input.Body)
 	if err != nil {
-		if errors.Is(err, subsvc.ErrDBUnavailable) {
-			return nil, huma.Error503ServiceUnavailable("database unavailable")
-		}
-		if errors.Is(err, subsvc.ErrDeviceNotFound) {
-			return nil, huma.Error400BadRequest("device not found")
-		}
-		if errors.Is(err, subsvc.ErrSourceNotFound) {
-			return nil, huma.Error400BadRequest("source not found")
-		}
-		if errors.Is(err, subsvc.ErrDuplicateSubscription) {
-			return nil, huma.Error409Conflict("device is already subscribed to this source")
-		}
-		return nil, huma.Error500InternalServerError("failed to create device subscription", err)
+		return nil, err
 	}
 
 	return &CreateDeviceSubscriptionOutput{
-		Body: *sub,
+		Body: sub,
 	}, nil
 }

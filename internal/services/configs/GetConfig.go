@@ -3,31 +3,29 @@ package configs
 import (
 	"context"
 	"errors"
+
+	"github.com/danielgtaylor/huma/v2"
 )
 
-// ErrDBUnavailable is returned when the database is not available.
-var ErrDBUnavailable = errors.New("database unavailable")
+type GetConfigRequest struct{}
+
+type GetConfigResponse = PersistedConfig
 
 // GetConfig returns the current persisted config, initializing defaults if needed.
-// If the database is unavailable, returns ErrDBUnavailable.
-func (s *Service) GetConfig(ctx context.Context) (*PersistedConfig, error) {
-	if s.db == nil {
-		return nil, ErrDBUnavailable
-	}
-
+func (s *Service) GetConfig(ctx context.Context, _ GetConfigRequest) (GetConfigResponse, error) {
 	cfg, err := s.Load(ctx)
 	if err == nil {
-		return cfg, nil
+		return *cfg, nil
 	}
 	if !errors.Is(err, ErrConfigNotFound) {
-		return nil, err
+		return GetConfigResponse{}, huma.Error500InternalServerError("failed to get config", err)
 	}
 
 	// Config row is absent or empty; inject defaults and store them.
 	defaultCfg := DefaultPersistedConfig()
 	if err := s.Store(ctx, defaultCfg); err != nil {
-		return nil, err
+		return GetConfigResponse{}, huma.Error500InternalServerError("failed to initialize config defaults", err)
 	}
 
-	return defaultCfg, nil
+	return *defaultCfg, nil
 }

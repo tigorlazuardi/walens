@@ -2,15 +2,16 @@ package devices
 
 import (
 	"context"
-	"fmt"
+	"errors"
 
+	"github.com/danielgtaylor/huma/v2"
 	. "github.com/go-jet/jet/v2/sqlite"
 	"github.com/walens/walens/internal/db/generated/model"
 	. "github.com/walens/walens/internal/db/generated/table"
 	"github.com/walens/walens/internal/dbtypes"
 )
 
-type CreateDeviceInput struct {
+type CreateDeviceRequest struct {
 	Name                 string  `json:"name" doc:"Human-readable device name."`
 	Slug                 string  `json:"slug" doc:"URL-safe device identifier for paths (lowercase letters, numbers, hyphens only)."`
 	ScreenWidth          int64   `json:"screen_width" doc:"Device screen width in pixels."`
@@ -26,41 +27,55 @@ type CreateDeviceInput struct {
 	AspectRatioTolerance float64 `json:"aspect_ratio_tolerance" doc:"Absolute aspect ratio tolerance for matching wallpapers (0-1)."`
 }
 
-func (s *Service) CreateDevice(ctx context.Context, input *CreateDeviceInput) (*DeviceRow, error) {
-	if s.db == nil {
-		return nil, ErrDBUnavailable
+type CreateDeviceResponse = model.Devices
+
+func (s *Service) CreateDevice(ctx context.Context, req CreateDeviceRequest) (CreateDeviceResponse, error) {
+	req.Slug = normalizeSlug(req.Slug)
+	if err := validateDeviceInput(&req); err != nil {
+		if errors.Is(err, ErrInvalidSlug) {
+			return CreateDeviceResponse{}, huma.Error400BadRequest("invalid slug: must contain only lowercase letters, numbers, and hyphens", err)
+		}
+		if errors.Is(err, ErrInvalidScreenDimensions) {
+			return CreateDeviceResponse{}, huma.Error400BadRequest("screen width and height must be positive", err)
+		}
+		if errors.Is(err, ErrInvalidImageBounds) {
+			return CreateDeviceResponse{}, huma.Error400BadRequest("min image dimensions cannot exceed max dimensions", err)
+		}
+		if errors.Is(err, ErrInvalidFilesizeBounds) {
+			return CreateDeviceResponse{}, huma.Error400BadRequest("min filesize cannot exceed max filesize", err)
+		}
+		if errors.Is(err, ErrInvalidAspectRatioTolerance) {
+			return CreateDeviceResponse{}, huma.Error400BadRequest("aspect ratio tolerance must be between 0 and 1", err)
+		}
+		return CreateDeviceResponse{}, huma.Error500InternalServerError("failed to validate device", err)
 	}
-	input.Slug = normalizeSlug(input.Slug)
-	if err := validateDeviceInput(input); err != nil {
-		return nil, err
-	}
-	duplicateCount, err := s.countDevices(ctx, Devices.Slug.EQ(String(input.Slug)))
+	duplicateCount, err := s.countDevices(ctx, Devices.Slug.EQ(String(req.Slug)))
 	if err != nil {
-		return nil, fmt.Errorf("check duplicate slug: %w", err)
+		return CreateDeviceResponse{}, huma.Error500InternalServerError("failed to check duplicate device slug", err)
 	}
 	if duplicateCount > 0 {
-		return nil, ErrDuplicateDeviceSlug
+		return CreateDeviceResponse{}, huma.Error409Conflict("device with this slug already exists", ErrDuplicateDeviceSlug)
 	}
 	now := dbtypes.NewUnixMilliTimeNow()
 	id, err := dbtypes.NewUUIDV7()
 	if err != nil {
-		return nil, fmt.Errorf("generate UUIDv7: %w", err)
+		return CreateDeviceResponse{}, huma.Error500InternalServerError("failed to generate device id", err)
 	}
 	row := model.Devices{
 		ID:                   &id,
-		Name:                 input.Name,
-		Slug:                 input.Slug,
-		ScreenWidth:          input.ScreenWidth,
-		ScreenHeight:         input.ScreenHeight,
-		MinImageWidth:        input.MinImageWidth,
-		MaxImageWidth:        input.MaxImageWidth,
-		MinImageHeight:       input.MinImageHeight,
-		MaxImageHeight:       input.MaxImageHeight,
-		MinFilesize:          input.MinFilesize,
-		MaxFilesize:          input.MaxFilesize,
-		IsAdultAllowed:       dbtypes.BoolInt(input.IsAdultAllowed),
-		IsEnabled:            dbtypes.BoolInt(input.IsEnabled),
-		AspectRatioTolerance: input.AspectRatioTolerance,
+		Name:                 req.Name,
+		Slug:                 req.Slug,
+		ScreenWidth:          req.ScreenWidth,
+		ScreenHeight:         req.ScreenHeight,
+		MinImageWidth:        req.MinImageWidth,
+		MaxImageWidth:        req.MaxImageWidth,
+		MinImageHeight:       req.MinImageHeight,
+		MaxImageHeight:       req.MaxImageHeight,
+		MinFilesize:          req.MinFilesize,
+		MaxFilesize:          req.MaxFilesize,
+		IsAdultAllowed:       dbtypes.BoolInt(req.IsAdultAllowed),
+		IsEnabled:            dbtypes.BoolInt(req.IsEnabled),
+		AspectRatioTolerance: req.AspectRatioTolerance,
 		CreatedAt:            now,
 		UpdatedAt:            now,
 	}
@@ -71,7 +86,7 @@ func (s *Service) CreateDevice(ctx context.Context, input *CreateDeviceInput) (*
 		Devices.AspectRatioTolerance, Devices.CreatedAt, Devices.UpdatedAt,
 	).MODEL(row)
 	if _, err := stmt.ExecContext(ctx, s.db); err != nil {
-		return nil, fmt.Errorf("insert device: %w", err)
+		return CreateDeviceResponse{}, huma.Error500InternalServerError("failed to create device", err)
 	}
-	return s.GetDevice(ctx, id)
+	return s.GetDevice(ctx, GetDeviceRequest{ID: id})
 }

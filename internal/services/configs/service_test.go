@@ -3,7 +3,6 @@ package configs
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"testing"
 
 	_ "modernc.org/sqlite"
@@ -36,7 +35,7 @@ func TestGetConfigReturnsExisting(t *testing.T) {
 	}
 
 	svc := NewService(db)
-	loaded, err := svc.GetConfig(context.Background())
+	loaded, err := svc.GetConfig(context.Background(), GetConfigRequest{})
 	if err != nil {
 		t.Fatalf("GetConfig failed: %v", err)
 	}
@@ -66,7 +65,7 @@ func TestGetConfigInitializesDefaultsWhenAbsent(t *testing.T) {
 	}
 
 	svc := NewService(db)
-	loaded, err := svc.GetConfig(context.Background())
+	loaded, err := svc.GetConfig(context.Background(), GetConfigRequest{})
 	if err != nil {
 		t.Fatalf("GetConfig failed: %v", err)
 	}
@@ -77,14 +76,6 @@ func TestGetConfigInitializesDefaultsWhenAbsent(t *testing.T) {
 	}
 	if loaded.LogLevel != "info" {
 		t.Errorf("expected default LogLevel 'info', got: %q", loaded.LogLevel)
-	}
-}
-
-func TestGetConfigReturnsErrDBUnavailableWhenDBIsNil(t *testing.T) {
-	svc := NewService(nil)
-	_, err := svc.GetConfig(context.Background())
-	if !errors.Is(err, ErrDBUnavailable) {
-		t.Errorf("expected ErrDBUnavailable, got: %v", err)
 	}
 }
 
@@ -105,7 +96,7 @@ func TestUpdateConfigStoresConfig(t *testing.T) {
 	}
 
 	svc := NewService(db)
-	newCfg := &PersistedConfig{
+	newCfg := UpdateConfigRequest{
 		DataDir:  "/new/data",
 		LogLevel: "debug",
 	}
@@ -129,14 +120,5 @@ func TestUpdateConfigStoresConfig(t *testing.T) {
 	}
 	if loaded.DataDir != "/new/data" {
 		t.Errorf("expected stored DataDir '/new/data', got: %q", loaded.DataDir)
-	}
-}
-
-func TestUpdateConfigReturnsErrDBUnavailableWhenDBIsNil(t *testing.T) {
-	svc := NewService(nil)
-	cfg := &PersistedConfig{DataDir: "/data", LogLevel: "info"}
-	_, err := svc.UpdateConfig(context.Background(), cfg)
-	if !errors.Is(err, ErrDBUnavailable) {
-		t.Errorf("expected ErrDBUnavailable, got: %v", err)
 	}
 }

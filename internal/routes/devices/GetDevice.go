@@ -2,11 +2,9 @@ package devices
 
 import (
 	"context"
-	"errors"
 	"path"
 
 	"github.com/danielgtaylor/huma/v2"
-	"github.com/walens/walens/internal/dbtypes"
 	devicesvc "github.com/walens/walens/internal/services/devices"
 )
 
@@ -24,36 +22,21 @@ func GetDeviceOperation(basePath string) huma.Operation {
 
 // GetDeviceInput describes the request body for GetDevice.
 type GetDeviceInput struct {
-	Body struct {
-		ID string `json:"id" doc:"Unique device identifier (UUIDv7)."`
-	}
+	Body devicesvc.GetDeviceRequest
 }
 
 // GetDeviceOutput describes the response body for GetDevice.
 type GetDeviceOutput struct {
-	Body devicesvc.DeviceRow
+	Body devicesvc.GetDeviceResponse
 }
 
 // GetDevice handles POST /api/v1/devices/GetDevice.
 // Returns a single device row by ID.
 func GetDevice(ctx context.Context, input *GetDeviceInput, svc *devicesvc.Service) (*GetDeviceOutput, error) {
-	id, err := dbtypes.NewUUIDFromString(input.Body.ID)
+	dev, err := svc.GetDevice(ctx, input.Body)
 	if err != nil {
-		return nil, huma.Error400BadRequest("invalid device ID format", err)
+		return nil, err
 	}
 
-	dev, err := svc.GetDevice(ctx, id)
-	if err != nil {
-		if errors.Is(err, devicesvc.ErrDBUnavailable) {
-			return nil, huma.Error503ServiceUnavailable("database unavailable")
-		}
-		if errors.Is(err, devicesvc.ErrDeviceNotFound) {
-			return nil, huma.Error404NotFound("device not found")
-		}
-		return nil, huma.Error500InternalServerError("failed to get device", err)
-	}
-
-	return &GetDeviceOutput{
-		Body: *dev,
-	}, nil
+	return &GetDeviceOutput{Body: dev}, nil
 }

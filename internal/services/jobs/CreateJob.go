@@ -2,49 +2,45 @@ package jobs
 
 import (
 	"context"
-	"fmt"
 
+	"github.com/danielgtaylor/huma/v2"
 	"github.com/walens/walens/internal/db/generated/model"
 	. "github.com/walens/walens/internal/db/generated/table"
 	"github.com/walens/walens/internal/dbtypes"
 )
 
 // CreateJob creates a new job row using the generated Go-Jet model.
-func (s *Service) CreateJob(ctx context.Context, input *CreateJobInput) (*model.Jobs, error) {
-	if s.db == nil {
-		return nil, ErrDBUnavailable
+func (s *Service) CreateJob(ctx context.Context, req CreateJobRequest) (JobResponse, error) {
+	if err := validateJobType(req.JobType); err != nil {
+		return JobResponse{}, huma.Error400BadRequest(err.Error(), err)
 	}
-
-	if err := validateJobType(input.JobType); err != nil {
-		return nil, err
-	}
-	if err := validateTriggerKind(input.TriggerKind); err != nil {
-		return nil, err
+	if err := validateTriggerKind(req.TriggerKind); err != nil {
+		return JobResponse{}, huma.Error400BadRequest(err.Error(), err)
 	}
 
 	now := dbtypes.NewUnixMilliTimeNow()
 	id, err := dbtypes.NewUUIDV7()
 	if err != nil {
-		return nil, fmt.Errorf("generate UUIDv7: %w", err)
+		return JobResponse{}, huma.Error500InternalServerError("failed to generate job id", err)
 	}
 
 	job := model.Jobs{
 		ID:                   &id,
-		JobType:              input.JobType,
-		SourceID:             input.SourceID,
-		SourceName:           strPtr(input.SourceName),
-		SourceType:           strPtr(input.SourceType),
+		JobType:              req.JobType,
+		SourceID:             req.SourceID,
+		SourceName:           strPtr(req.SourceName),
+		SourceType:           strPtr(req.SourceType),
 		Status:               StatusQueued,
-		TriggerKind:          input.TriggerKind,
-		RunAfter:             dbtypes.NewUnixMilliTime(input.RunAfter),
-		RequestedImageCount:  input.RequestedImageCount,
+		TriggerKind:          req.TriggerKind,
+		RunAfter:             dbtypes.NewUnixMilliTime(req.RunAfter),
+		RequestedImageCount:  req.RequestedImageCount,
 		DownloadedImageCount: 0,
 		ReusedImageCount:     0,
 		HardlinkedImageCount: 0,
 		CopiedImageCount:     0,
 		StoredImageCount:     0,
 		SkippedImageCount:    0,
-		JSONInput:            ensureJSON(input.JSONInput),
+		JSONInput:            ensureJSON(req.JSONInput),
 		JSONResult:           dbtypes.RawJSON([]byte("{}")),
 		CreatedAt:            now,
 		UpdatedAt:            now,
@@ -73,10 +69,10 @@ func (s *Service) CreateJob(ctx context.Context, input *CreateJobInput) (*model.
 	).MODEL(job)
 
 	if _, err := stmt.ExecContext(ctx, s.db); err != nil {
-		return nil, fmt.Errorf("insert job: %w", err)
+		return JobResponse{}, huma.Error500InternalServerError("failed to create job", err)
 	}
 
-	return s.GetJob(ctx, id)
+	return s.GetJob(ctx, GetJobRequest{ID: id})
 }
 
 func strPtr(s string) *string {

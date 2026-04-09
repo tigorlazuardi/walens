@@ -15,7 +15,6 @@ import (
 	"github.com/walens/walens/internal/dbtypes"
 )
 
-var ErrDBUnavailable = errors.New("database unavailable")
 var ErrScheduleNotFound = errors.New("source schedule not found")
 var ErrSourceNotFound = errors.New("source not found")
 var ErrInvalidCronExpr = errors.New("invalid cron expression")

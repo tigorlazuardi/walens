@@ -2,11 +2,9 @@ package sources
 
 import (
 	"context"
-	"errors"
 	"path"
 
 	"github.com/danielgtaylor/huma/v2"
-	"github.com/walens/walens/internal/dbtypes"
 	sourcesvc "github.com/walens/walens/internal/services/sources"
 )
 
@@ -25,28 +23,15 @@ func DeleteSourceOperation(basePath string) huma.Operation {
 
 // DeleteSourceInput describes the request body for DeleteSource.
 type DeleteSourceInput struct {
-	Body struct {
-		ID string `json:"id" doc:"Unique source identifier (UUIDv7)."`
-	}
+	Body sourcesvc.DeleteSourceRequest
 }
 
 // DeleteSource handles POST /api/v1/sources/DeleteSource.
 // Deletes a configured source row by ID.
 func DeleteSource(ctx context.Context, input *DeleteSourceInput, svc *sourcesvc.Service) (*struct{}, error) {
-	id, err := dbtypes.NewUUIDFromString(input.Body.ID)
+	_, err := svc.DeleteSource(ctx, input.Body)
 	if err != nil {
-		return nil, huma.Error400BadRequest("invalid source ID format", err)
-	}
-
-	err = svc.DeleteSource(ctx, id)
-	if err != nil {
-		if errors.Is(err, sourcesvc.ErrDBUnavailable) {
-			return nil, huma.Error503ServiceUnavailable("database unavailable")
-		}
-		if errors.Is(err, sourcesvc.ErrSourceNotFound) {
-			return nil, huma.Error404NotFound("source not found")
-		}
-		return nil, huma.Error500InternalServerError("failed to delete source", err)
+		return nil, err
 	}
 
 	return nil, nil

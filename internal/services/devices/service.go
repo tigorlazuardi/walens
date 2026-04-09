@@ -9,22 +9,20 @@ import (
 	"strings"
 
 	. "github.com/go-jet/jet/v2/sqlite"
-	"github.com/walens/walens/internal/db/generated/model"
 	. "github.com/walens/walens/internal/db/generated/table"
 )
 
-var ErrDBUnavailable = errors.New("database unavailable")
-var ErrDeviceNotFound = errors.New("device not found")
-var ErrDuplicateDeviceSlug = errors.New("device with this slug already exists")
-var ErrInvalidSlug = errors.New("invalid slug: must contain only lowercase letters, numbers, and hyphens")
-var ErrInvalidScreenDimensions = errors.New("screen width and height must be positive")
-var ErrInvalidImageBounds = errors.New("min image dimensions cannot exceed max dimensions")
-var ErrInvalidFilesizeBounds = errors.New("min filesize cannot exceed max filesize")
-var ErrInvalidAspectRatioTolerance = errors.New("aspect ratio tolerance must be between 0 and 1")
+var (
+	ErrDeviceNotFound              = errors.New("device not found")
+	ErrDuplicateDeviceSlug         = errors.New("device with this slug already exists")
+	ErrInvalidSlug                 = errors.New("invalid slug: must contain only lowercase letters, numbers, and hyphens")
+	ErrInvalidScreenDimensions     = errors.New("screen width and height must be positive")
+	ErrInvalidImageBounds          = errors.New("min image dimensions cannot exceed max dimensions")
+	ErrInvalidFilesizeBounds       = errors.New("min filesize cannot exceed max filesize")
+	ErrInvalidAspectRatioTolerance = errors.New("aspect ratio tolerance must be between 0 and 1")
+)
 
 var slugRegex = regexp.MustCompile(`^[a-z0-9-]+$`)
-
-type DeviceRow = model.Devices
 
 type Service struct{ db *sql.DB }
 
@@ -39,7 +37,7 @@ func validateSlug(slug string) error {
 	return nil
 }
 
-func validateDeviceInput(input *CreateDeviceInput) error {
+func validateDeviceInput(input *CreateDeviceRequest) error {
 	if err := validateSlug(normalizeSlug(input.Slug)); err != nil {
 		return err
 	}

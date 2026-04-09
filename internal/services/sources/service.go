@@ -13,7 +13,6 @@ import (
 	appsources "github.com/walens/walens/internal/sources"
 )
 
-var ErrDBUnavailable = errors.New("database unavailable")
 var ErrSourceNotFound = errors.New("source not found")
 var ErrDuplicateSourceName = errors.New("source with this name already exists")
 var ErrInvalidSourceType = errors.New("invalid source type: not registered")

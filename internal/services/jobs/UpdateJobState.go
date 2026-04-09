@@ -2,27 +2,26 @@ package jobs
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 
+	"github.com/danielgtaylor/huma/v2"
 	. "github.com/go-jet/jet/v2/sqlite"
-	"github.com/walens/walens/internal/db/generated/model"
 	. "github.com/walens/walens/internal/db/generated/table"
 	"github.com/walens/walens/internal/dbtypes"
 )
 
 // StartJob transitions a job from queued to running.
-func (s *Service) StartJob(ctx context.Context, id dbtypes.UUID) (*model.Jobs, error) {
-	job, err := s.GetJob(ctx, id)
+func (s *Service) StartJob(ctx context.Context, req StartJobRequest) (JobResponse, error) {
+	job, err := s.GetJob(ctx, GetJobRequest{ID: req.ID})
 	if err != nil {
-		return nil, err
+		return JobResponse{}, err
 	}
 	if !isValidTransition(job.Status, StatusRunning) {
-		return nil, fmt.Errorf("%w: cannot transition from %s to %s", ErrInvalidTransition, job.Status, StatusRunning)
+		return JobResponse{}, huma.Error400BadRequest(fmt.Sprintf("cannot transition from %s to %s", job.Status, StatusRunning), ErrInvalidTransition)
 	}
 
 	now := dbtypes.NewUnixMilliTimeNow()
-	updated := *job
+	updated := job
 	updated.Status = StatusRunning
 	updated.StartedAt = &now
 	updated.UpdatedAt = now
@@ -32,32 +31,32 @@ func (s *Service) StartJob(ctx context.Context, id dbtypes.UUID) (*model.Jobs, e
 		Jobs.StartedAt,
 		Jobs.UpdatedAt,
 	).MODEL(updated).WHERE(
-		Jobs.ID.EQ(String(id.UUID.String())),
+		Jobs.ID.EQ(String(req.ID.UUID.String())),
 	)
 
 	if _, err := stmt.ExecContext(ctx, s.db); err != nil {
-		return nil, fmt.Errorf("start job: %w", err)
+		return JobResponse{}, huma.Error500InternalServerError("failed to start job", err)
 	}
 
-	return s.GetJob(ctx, id)
+	return s.GetJob(ctx, GetJobRequest{ID: req.ID})
 }
 
 // CompleteJob transitions a job to succeeded state.
-func (s *Service) CompleteJob(ctx context.Context, id dbtypes.UUID, message *string, jsonResult json.RawMessage) (*model.Jobs, error) {
-	job, err := s.GetJob(ctx, id)
+func (s *Service) CompleteJob(ctx context.Context, req CompleteJobRequest) (JobResponse, error) {
+	job, err := s.GetJob(ctx, GetJobRequest{ID: req.ID})
 	if err != nil {
-		return nil, err
+		return JobResponse{}, err
 	}
 	if !isValidTransition(job.Status, StatusSucceeded) {
-		return nil, fmt.Errorf("%w: cannot transition from %s to %s", ErrInvalidTransition, job.Status, StatusSucceeded)
+		return JobResponse{}, huma.Error400BadRequest(fmt.Sprintf("cannot transition from %s to %s", job.Status, StatusSucceeded), ErrInvalidTransition)
 	}
 
 	now := dbtypes.NewUnixMilliTimeNow()
-	updated := *job
+	updated := job
 	updated.Status = StatusSucceeded
 	updated.FinishedAt = &now
-	updated.Message = message
-	updated.JSONResult = ensureJSON(jsonResult)
+	updated.Message = req.Message
+	updated.JSONResult = ensureJSON(req.JSONResult)
 	updated.UpdatedAt = now
 	if job.StartedAt != nil {
 		d := dbtypes.NewUnixMilliDuration(now.Time.Sub(job.StartedAt.Time))
@@ -72,32 +71,32 @@ func (s *Service) CompleteJob(ctx context.Context, id dbtypes.UUID, message *str
 		Jobs.JSONResult,
 		Jobs.UpdatedAt,
 	).MODEL(updated).WHERE(
-		Jobs.ID.EQ(String(id.UUID.String())),
+		Jobs.ID.EQ(String(req.ID.UUID.String())),
 	)
 
 	if _, err := stmt.ExecContext(ctx, s.db); err != nil {
-		return nil, fmt.Errorf("complete job: %w", err)
+		return JobResponse{}, huma.Error500InternalServerError("failed to complete job", err)
 	}
 
-	return s.GetJob(ctx, id)
+	return s.GetJob(ctx, GetJobRequest{ID: req.ID})
 }
 
 // FailJob transitions a job to failed state.
-func (s *Service) FailJob(ctx context.Context, id dbtypes.UUID, errorMessage string, jsonResult json.RawMessage) (*model.Jobs, error) {
-	job, err := s.GetJob(ctx, id)
+func (s *Service) FailJob(ctx context.Context, req FailJobRequest) (JobResponse, error) {
+	job, err := s.GetJob(ctx, GetJobRequest{ID: req.ID})
 	if err != nil {
-		return nil, err
+		return JobResponse{}, err
 	}
 	if !isValidTransition(job.Status, StatusFailed) {
-		return nil, fmt.Errorf("%w: cannot transition from %s to %s", ErrInvalidTransition, job.Status, StatusFailed)
+		return JobResponse{}, huma.Error400BadRequest(fmt.Sprintf("cannot transition from %s to %s", job.Status, StatusFailed), ErrInvalidTransition)
 	}
 
 	now := dbtypes.NewUnixMilliTimeNow()
-	updated := *job
+	updated := job
 	updated.Status = StatusFailed
 	updated.FinishedAt = &now
-	updated.ErrorMessage = &errorMessage
-	updated.JSONResult = ensureJSON(jsonResult)
+	updated.ErrorMessage = &req.ErrorMessage
+	updated.JSONResult = ensureJSON(req.JSONResult)
 	updated.UpdatedAt = now
 	if job.StartedAt != nil {
 		d := dbtypes.NewUnixMilliDuration(now.Time.Sub(job.StartedAt.Time))
@@ -112,30 +111,30 @@ func (s *Service) FailJob(ctx context.Context, id dbtypes.UUID, errorMessage str
 		Jobs.JSONResult,
 		Jobs.UpdatedAt,
 	).MODEL(updated).WHERE(
-		Jobs.ID.EQ(String(id.UUID.String())),
+		Jobs.ID.EQ(String(req.ID.UUID.String())),
 	)
 
 	if _, err := stmt.ExecContext(ctx, s.db); err != nil {
-		return nil, fmt.Errorf("fail job: %w", err)
+		return JobResponse{}, huma.Error500InternalServerError("failed to fail job", err)
 	}
 
-	return s.GetJob(ctx, id)
+	return s.GetJob(ctx, GetJobRequest{ID: req.ID})
 }
 
 // CancelJob transitions a job to cancelled state.
-func (s *Service) CancelJob(ctx context.Context, id dbtypes.UUID, message *string) (*model.Jobs, error) {
-	job, err := s.GetJob(ctx, id)
+func (s *Service) CancelJob(ctx context.Context, req CancelJobRequest) (JobResponse, error) {
+	job, err := s.GetJob(ctx, GetJobRequest{ID: req.ID})
 	if err != nil {
-		return nil, err
+		return JobResponse{}, err
 	}
 	if !isValidTransition(job.Status, StatusCancelled) {
-		return nil, fmt.Errorf("%w: cannot transition from %s to %s", ErrInvalidTransition, job.Status, StatusCancelled)
+		return JobResponse{}, huma.Error400BadRequest(fmt.Sprintf("cannot transition from %s to %s", job.Status, StatusCancelled), ErrInvalidTransition)
 	}
 
 	now := dbtypes.NewUnixMilliTimeNow()
-	updated := *job
+	updated := job
 	updated.Status = StatusCancelled
-	updated.Message = message
+	updated.Message = req.Message
 	updated.UpdatedAt = now
 	if job.StartedAt != nil {
 		updated.FinishedAt = &now
@@ -150,51 +149,51 @@ func (s *Service) CancelJob(ctx context.Context, id dbtypes.UUID, message *strin
 		Jobs.Message,
 		Jobs.UpdatedAt,
 	).MODEL(updated).WHERE(
-		Jobs.ID.EQ(String(id.UUID.String())),
+		Jobs.ID.EQ(String(req.ID.UUID.String())),
 	)
 
 	if _, err := stmt.ExecContext(ctx, s.db); err != nil {
-		return nil, fmt.Errorf("cancel job: %w", err)
+		return JobResponse{}, huma.Error500InternalServerError("failed to cancel job", err)
 	}
 
-	return s.GetJob(ctx, id)
+	return s.GetJob(ctx, GetJobRequest{ID: req.ID})
 }
 
 // UpdateJobState updates job status with validation.
-func (s *Service) UpdateJobState(ctx context.Context, input *UpdateJobStateInput) (*model.Jobs, error) {
-	if err := validateStatus(input.Status); err != nil {
-		return nil, err
+func (s *Service) UpdateJobState(ctx context.Context, req UpdateJobStateRequest) (JobResponse, error) {
+	if err := validateStatus(req.Status); err != nil {
+		return JobResponse{}, huma.Error400BadRequest(err.Error(), err)
 	}
 
-	switch input.Status {
+	switch req.Status {
 	case StatusRunning:
-		return s.StartJob(ctx, input.ID)
+		return s.StartJob(ctx, StartJobRequest{ID: req.ID})
 	case StatusSucceeded:
-		return s.CompleteJob(ctx, input.ID, nil, nil)
+		return s.CompleteJob(ctx, CompleteJobRequest{ID: req.ID})
 	case StatusFailed:
-		return s.FailJob(ctx, input.ID, "", nil)
+		return s.FailJob(ctx, FailJobRequest{ID: req.ID, ErrorMessage: ""})
 	case StatusCancelled:
-		return s.CancelJob(ctx, input.ID, nil)
+		return s.CancelJob(ctx, CancelJobRequest{ID: req.ID})
 	default:
-		job, err := s.GetJob(ctx, input.ID)
+		job, err := s.GetJob(ctx, GetJobRequest{ID: req.ID})
 		if err != nil {
-			return nil, err
+			return JobResponse{}, err
 		}
-		if !isValidTransition(job.Status, input.Status) {
-			return nil, fmt.Errorf("%w: cannot transition from %s to %s", ErrInvalidTransition, job.Status, input.Status)
+		if !isValidTransition(job.Status, req.Status) {
+			return JobResponse{}, huma.Error400BadRequest(fmt.Sprintf("cannot transition from %s to %s", job.Status, req.Status), ErrInvalidTransition)
 		}
-		updated := *job
-		updated.Status = input.Status
+		updated := job
+		updated.Status = req.Status
 		updated.UpdatedAt = dbtypes.NewUnixMilliTimeNow()
 
 		stmt := Jobs.UPDATE(Jobs.Status, Jobs.UpdatedAt).MODEL(updated).WHERE(
-			Jobs.ID.EQ(String(input.ID.UUID.String())),
+			Jobs.ID.EQ(String(req.ID.UUID.String())),
 		)
 
 		if _, err := stmt.ExecContext(ctx, s.db); err != nil {
-			return nil, fmt.Errorf("update job state: %w", err)
+			return JobResponse{}, huma.Error500InternalServerError("failed to update job state", err)
 		}
 
-		return s.GetJob(ctx, input.ID)
+		return s.GetJob(ctx, GetJobRequest{ID: req.ID})
 	}
 }

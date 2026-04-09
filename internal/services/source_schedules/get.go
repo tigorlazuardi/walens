@@ -3,8 +3,8 @@ package source_schedules
 import (
 	"context"
 	"errors"
-	"fmt"
 
+	"github.com/danielgtaylor/huma/v2"
 	"github.com/go-jet/jet/v2/qrm"
 	. "github.com/go-jet/jet/v2/sqlite"
 	"github.com/walens/walens/internal/db/generated/model"
@@ -12,21 +12,24 @@ import (
 	"github.com/walens/walens/internal/dbtypes"
 )
 
+type GetScheduleRequest struct {
+	ID dbtypes.UUID `json:"id" doc:"Unique source schedule identifier."`
+}
+
+type GetScheduleResponse = model.SourceSchedules
+
 // GetSchedule returns a single source schedule by ID.
-func (s *Service) GetSchedule(ctx context.Context, id dbtypes.UUID) (*ScheduleRow, error) {
-	if s.db == nil {
-		return nil, ErrDBUnavailable
-	}
+func (s *Service) GetSchedule(ctx context.Context, req GetScheduleRequest) (GetScheduleResponse, error) {
 	var sched model.SourceSchedules
 	stmt := SELECT(SourceSchedules.AllColumns).
 		FROM(SourceSchedules).
-		WHERE(SourceSchedules.ID.EQ(String(id.UUID.String()))).
+		WHERE(SourceSchedules.ID.EQ(String(req.ID.UUID.String()))).
 		LIMIT(1)
 	if err := stmt.QueryContext(ctx, s.db, &sched); err != nil {
 		if errors.Is(err, qrm.ErrNoRows) {
-			return nil, ErrScheduleNotFound
+			return GetScheduleResponse{}, huma.Error404NotFound("source schedule not found", ErrScheduleNotFound)
 		}
-		return nil, fmt.Errorf("query schedule: %w", err)
+		return GetScheduleResponse{}, huma.Error500InternalServerError("failed to get source schedule", err)
 	}
-	return &sched, nil
+	return sched, nil
 }

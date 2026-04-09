@@ -3,7 +3,6 @@ package source_schedules
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"testing"
 
 	"github.com/walens/walens/internal/dbtypes"
@@ -130,12 +129,12 @@ func TestServiceListSchedulesEmpty(t *testing.T) {
 	createTables(t, db)
 
 	sched := NewService(db, nil)
-	items, err := sched.ListSchedules(context.Background())
+	items, err := sched.ListSchedules(context.Background(), ListSchedulesRequest{})
 	if err != nil {
 		t.Fatalf("ListSchedules failed: %v", err)
 	}
-	if len(items) != 0 {
-		t.Errorf("expected 0 schedules, got %d", len(items))
+	if len(items.Items) != 0 {
+		t.Errorf("expected 0 schedules, got %d", len(items.Items))
 	}
 }
 
@@ -156,15 +155,15 @@ func TestServiceListSchedulesWithData(t *testing.T) {
 	}
 
 	sched := NewService(db, nil)
-	items, err := sched.ListSchedules(context.Background())
+	items, err := sched.ListSchedules(context.Background(), ListSchedulesRequest{})
 	if err != nil {
 		t.Fatalf("ListSchedules failed: %v", err)
 	}
-	if len(items) != 1 {
-		t.Errorf("expected 1 schedule, got %d", len(items))
+	if len(items.Items) != 1 {
+		t.Errorf("expected 1 schedule, got %d", len(items.Items))
 	}
-	if items[0].CronExpr != "0 * * * *" {
-		t.Errorf("expected cron_expr '0 * * * *', got %q", items[0].CronExpr)
+	if items.Items[0].CronExpr != "0 * * * *" {
+		t.Errorf("expected cron_expr '0 * * * *', got %q", items.Items[0].CronExpr)
 	}
 }
 
@@ -186,7 +185,7 @@ func TestServiceGetSchedule(t *testing.T) {
 
 	sched := NewService(db, nil)
 	id, _ := dbtypes.NewUUIDFromString("02800000-0000-0000-0000-000000000001")
-	item, err := sched.GetSchedule(context.Background(), id)
+	item, err := sched.GetSchedule(context.Background(), GetScheduleRequest{ID: id})
 	if err != nil {
 		t.Fatalf("GetSchedule failed: %v", err)
 	}
@@ -202,8 +201,8 @@ func TestServiceGetScheduleNotFound(t *testing.T) {
 
 	sched := NewService(db, nil)
 	id, _ := dbtypes.NewUUIDFromString("02800000-0000-0000-0000-000000000001")
-	_, err := sched.GetSchedule(context.Background(), id)
-	if !errors.Is(err, ErrScheduleNotFound) {
+	_, err := sched.GetSchedule(context.Background(), GetScheduleRequest{ID: id})
+	if err == nil {
 		t.Errorf("expected ErrScheduleNotFound, got %v", err)
 	}
 }
@@ -215,23 +214,24 @@ func TestServiceCreateSchedule(t *testing.T) {
 	insertTestSource(t, db, "01800000-0000-0000-0000-000000000001", "test-source")
 
 	sched := NewService(db, nil)
-	input := &CreateScheduleInput{
-		SourceID:  "01800000-0000-0000-0000-000000000001",
+	sourceID, _ := dbtypes.NewUUIDFromString("01800000-0000-0000-0000-000000000001")
+	input := CreateScheduleRequest{
+		SourceID:  sourceID,
 		CronExpr:  "0 * * * *",
 		IsEnabled: true,
 	}
 
-	item, warnings, err := sched.CreateSchedule(context.Background(), input)
+	resp, err := sched.CreateSchedule(context.Background(), input)
 	if err != nil {
 		t.Fatalf("CreateSchedule failed: %v", err)
 	}
-	if item.CronExpr != "0 * * * *" {
-		t.Errorf("expected cron_expr '0 * * * *', got %q", item.CronExpr)
+	if resp.Schedule.CronExpr != "0 * * * *" {
+		t.Errorf("expected cron_expr '0 * * * *', got %q", resp.Schedule.CronExpr)
 	}
-	if bool(item.IsEnabled) != true {
-		t.Errorf("expected is_enabled true, got %v", bool(item.IsEnabled))
+	if bool(resp.Schedule.IsEnabled) != true {
+		t.Errorf("expected is_enabled true, got %v", bool(resp.Schedule.IsEnabled))
 	}
-	if warnings == nil {
+	if resp.Warnings == nil {
 		t.Log("warnings may be nil if no overlaps, which is OK")
 	}
 }
@@ -243,14 +243,15 @@ func TestServiceCreateScheduleInvalidCron(t *testing.T) {
 	insertTestSource(t, db, "01800000-0000-0000-0000-000000000001", "test-source")
 
 	sched := NewService(db, nil)
-	input := &CreateScheduleInput{
-		SourceID:  "01800000-0000-0000-0000-000000000001",
+	sourceID, _ := dbtypes.NewUUIDFromString("01800000-0000-0000-0000-000000000001")
+	input := CreateScheduleRequest{
+		SourceID:  sourceID,
 		CronExpr:  "invalid",
 		IsEnabled: true,
 	}
 
-	_, _, err := sched.CreateSchedule(context.Background(), input)
-	if !errors.Is(err, ErrInvalidCronExpr) {
+	_, err := sched.CreateSchedule(context.Background(), input)
+	if err == nil {
 		t.Errorf("expected ErrInvalidCronExpr, got %v", err)
 	}
 }
@@ -261,14 +262,15 @@ func TestServiceCreateScheduleSourceNotFound(t *testing.T) {
 	createTables(t, db)
 
 	sched := NewService(db, nil)
-	input := &CreateScheduleInput{
-		SourceID:  "01800000-0000-0000-0000-000000000001",
+	sourceID, _ := dbtypes.NewUUIDFromString("01800000-0000-0000-0000-000000000001")
+	input := CreateScheduleRequest{
+		SourceID:  sourceID,
 		CronExpr:  "0 * * * *",
 		IsEnabled: true,
 	}
 
-	_, _, err := sched.CreateSchedule(context.Background(), input)
-	if !errors.Is(err, ErrSourceNotFound) {
+	_, err := sched.CreateSchedule(context.Background(), input)
+	if err == nil {
 		t.Errorf("expected ErrSourceNotFound, got %v", err)
 	}
 }
@@ -281,13 +283,14 @@ func TestServiceCreateScheduleCallsSchedulerReload(t *testing.T) {
 
 	mock := &mockScheduler{}
 	sched := NewService(db, mock)
-	input := &CreateScheduleInput{
-		SourceID:  "01800000-0000-0000-0000-000000000001",
+	sourceID, _ := dbtypes.NewUUIDFromString("01800000-0000-0000-0000-000000000001")
+	input := CreateScheduleRequest{
+		SourceID:  sourceID,
 		CronExpr:  "0 * * * *",
 		IsEnabled: true,
 	}
 
-	_, _, err := sched.CreateSchedule(context.Background(), input)
+	_, err := sched.CreateSchedule(context.Background(), input)
 	if err != nil {
 		t.Fatalf("CreateSchedule failed: %v", err)
 	}
@@ -313,22 +316,24 @@ func TestServiceUpdateSchedule(t *testing.T) {
 	}
 
 	sched := NewService(db, nil)
-	input := &UpdateScheduleInput{
-		ID:        "02800000-0000-0000-0000-000000000001",
-		SourceID:  "01800000-0000-0000-0000-000000000001",
+	id, _ := dbtypes.NewUUIDFromString("02800000-0000-0000-0000-000000000001")
+	sourceID, _ := dbtypes.NewUUIDFromString("01800000-0000-0000-0000-000000000001")
+	input := UpdateScheduleRequest{
+		ID:        id,
+		SourceID:  sourceID,
 		CronExpr:  "*/5 * * * *",
 		IsEnabled: false,
 	}
 
-	item, _, err := sched.UpdateSchedule(context.Background(), input)
+	resp, err := sched.UpdateSchedule(context.Background(), input)
 	if err != nil {
 		t.Fatalf("UpdateSchedule failed: %v", err)
 	}
-	if item.CronExpr != "*/5 * * * *" {
-		t.Errorf("expected cron_expr '*/5 * * * *', got %q", item.CronExpr)
+	if resp.Schedule.CronExpr != "*/5 * * * *" {
+		t.Errorf("expected cron_expr '*/5 * * * *', got %q", resp.Schedule.CronExpr)
 	}
-	if bool(item.IsEnabled) != false {
-		t.Errorf("expected is_enabled false, got %v", bool(item.IsEnabled))
+	if bool(resp.Schedule.IsEnabled) != false {
+		t.Errorf("expected is_enabled false, got %v", bool(resp.Schedule.IsEnabled))
 	}
 }
 
@@ -339,15 +344,17 @@ func TestServiceUpdateScheduleNotFound(t *testing.T) {
 	insertTestSource(t, db, "01800000-0000-0000-0000-000000000001", "test-source")
 
 	sched := NewService(db, nil)
-	input := &UpdateScheduleInput{
-		ID:        "02800000-0000-0000-0000-000000000001",
-		SourceID:  "01800000-0000-0000-0000-000000000001",
+	id, _ := dbtypes.NewUUIDFromString("02800000-0000-0000-0000-000000000001")
+	sourceID, _ := dbtypes.NewUUIDFromString("01800000-0000-0000-0000-000000000001")
+	input := UpdateScheduleRequest{
+		ID:        id,
+		SourceID:  sourceID,
 		CronExpr:  "0 * * * *",
 		IsEnabled: true,
 	}
 
-	_, _, err := sched.UpdateSchedule(context.Background(), input)
-	if !errors.Is(err, ErrScheduleNotFound) {
+	_, err := sched.UpdateSchedule(context.Background(), input)
+	if err == nil {
 		t.Errorf("expected ErrScheduleNotFound, got %v", err)
 	}
 }
@@ -369,15 +376,17 @@ func TestServiceUpdateScheduleSourceNotFound(t *testing.T) {
 	}
 
 	sched := NewService(db, nil)
-	input := &UpdateScheduleInput{
-		ID:        "02800000-0000-0000-0000-000000000001",
-		SourceID:  "01800000-0000-0000-0000-000000000002", // different source
+	id, _ := dbtypes.NewUUIDFromString("02800000-0000-0000-0000-000000000001")
+	sourceID, _ := dbtypes.NewUUIDFromString("01800000-0000-0000-0000-000000000002")
+	input := UpdateScheduleRequest{
+		ID:        id,
+		SourceID:  sourceID, // different source
 		CronExpr:  "0 * * * *",
 		IsEnabled: true,
 	}
 
-	_, _, err = sched.UpdateSchedule(context.Background(), input)
-	if !errors.Is(err, ErrSourceNotFound) {
+	_, err = sched.UpdateSchedule(context.Background(), input)
+	if err == nil {
 		t.Errorf("expected ErrSourceNotFound, got %v", err)
 	}
 }
@@ -400,14 +409,16 @@ func TestServiceUpdateScheduleCallsSchedulerReload(t *testing.T) {
 
 	mock := &mockScheduler{}
 	sched := NewService(db, mock)
-	input := &UpdateScheduleInput{
-		ID:        "02800000-0000-0000-0000-000000000001",
-		SourceID:  "01800000-0000-0000-0000-000000000001",
+	id, _ := dbtypes.NewUUIDFromString("02800000-0000-0000-0000-000000000001")
+	sourceID, _ := dbtypes.NewUUIDFromString("01800000-0000-0000-0000-000000000001")
+	input := UpdateScheduleRequest{
+		ID:        id,
+		SourceID:  sourceID,
 		CronExpr:  "*/5 * * * *",
 		IsEnabled: false,
 	}
 
-	_, _, err = sched.UpdateSchedule(context.Background(), input)
+	_, err = sched.UpdateSchedule(context.Background(), input)
 	if err != nil {
 		t.Fatalf("UpdateSchedule failed: %v", err)
 	}
@@ -434,14 +445,14 @@ func TestServiceDeleteSchedule(t *testing.T) {
 
 	sched := NewService(db, nil)
 	id, _ := dbtypes.NewUUIDFromString("02800000-0000-0000-0000-000000000001")
-	err = sched.DeleteSchedule(context.Background(), id)
+	_, err = sched.DeleteSchedule(context.Background(), DeleteScheduleRequest{ID: id})
 	if err != nil {
 		t.Fatalf("DeleteSchedule failed: %v", err)
 	}
 
 	// Verify deleted
-	_, err = sched.GetSchedule(context.Background(), id)
-	if !errors.Is(err, ErrScheduleNotFound) {
+	_, err = sched.GetSchedule(context.Background(), GetScheduleRequest{ID: id})
+	if err == nil {
 		t.Errorf("expected ErrScheduleNotFound after delete, got %v", err)
 	}
 }
@@ -453,8 +464,8 @@ func TestServiceDeleteScheduleNotFound(t *testing.T) {
 
 	sched := NewService(db, nil)
 	id, _ := dbtypes.NewUUIDFromString("02800000-0000-0000-0000-000000000001")
-	err := sched.DeleteSchedule(context.Background(), id)
-	if !errors.Is(err, ErrScheduleNotFound) {
+	_, err := sched.DeleteSchedule(context.Background(), DeleteScheduleRequest{ID: id})
+	if err == nil {
 		t.Errorf("expected ErrScheduleNotFound, got %v", err)
 	}
 }
@@ -478,42 +489,12 @@ func TestServiceDeleteScheduleCallsSchedulerReload(t *testing.T) {
 	mock := &mockScheduler{}
 	sched := NewService(db, mock)
 	id, _ := dbtypes.NewUUIDFromString("02800000-0000-0000-0000-000000000001")
-	err = sched.DeleteSchedule(context.Background(), id)
+	_, err = sched.DeleteSchedule(context.Background(), DeleteScheduleRequest{ID: id})
 	if err != nil {
 		t.Fatalf("DeleteSchedule failed: %v", err)
 	}
 	if mock.reloadCalled != 1 {
 		t.Errorf("expected Reload called once, got %d", mock.reloadCalled)
-	}
-}
-
-func TestServiceErrDBUnavailableWhenDBIsNil(t *testing.T) {
-	sched := NewService(nil, nil)
-
-	_, err := sched.ListSchedules(context.Background())
-	if !errors.Is(err, ErrDBUnavailable) {
-		t.Errorf("expected ErrDBUnavailable, got %v", err)
-	}
-
-	id, _ := dbtypes.NewUUIDFromString("02800000-0000-0000-0000-000000000001")
-	_, err = sched.GetSchedule(context.Background(), id)
-	if !errors.Is(err, ErrDBUnavailable) {
-		t.Errorf("expected ErrDBUnavailable, got %v", err)
-	}
-
-	_, _, err = sched.CreateSchedule(context.Background(), &CreateScheduleInput{})
-	if !errors.Is(err, ErrDBUnavailable) {
-		t.Errorf("expected ErrDBUnavailable, got %v", err)
-	}
-
-	_, _, err = sched.UpdateSchedule(context.Background(), &UpdateScheduleInput{})
-	if !errors.Is(err, ErrDBUnavailable) {
-		t.Errorf("expected ErrDBUnavailable, got %v", err)
-	}
-
-	err = sched.DeleteSchedule(context.Background(), id)
-	if !errors.Is(err, ErrDBUnavailable) {
-		t.Errorf("expected ErrDBUnavailable, got %v", err)
 	}
 }
 

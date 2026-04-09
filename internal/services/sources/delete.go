@@ -2,27 +2,29 @@ package sources
 
 import (
 	"context"
-	"fmt"
 
+	"github.com/danielgtaylor/huma/v2"
 	. "github.com/go-jet/jet/v2/sqlite"
 	. "github.com/walens/walens/internal/db/generated/table"
 	"github.com/walens/walens/internal/dbtypes"
 )
 
+type DeleteSourceRequest struct {
+	ID dbtypes.UUID `json:"id" doc:"Unique source identifier."`
+}
+
+type DeleteSourceResponse struct{}
+
 // DeleteSource deletes a source by ID.
-func (s *Service) DeleteSource(ctx context.Context, id dbtypes.UUID) error {
-	if s.db == nil {
-		return ErrDBUnavailable
+func (s *Service) DeleteSource(ctx context.Context, req DeleteSourceRequest) (DeleteSourceResponse, error) {
+	if _, err := s.GetSource(ctx, GetSourceRequest{ID: req.ID}); err != nil {
+		return DeleteSourceResponse{}, err
 	}
 
-	if _, err := s.GetSource(ctx, id); err != nil {
-		return err
-	}
-
-	stmt := Sources.DELETE().WHERE(Sources.ID.EQ(String(id.UUID.String())))
+	stmt := Sources.DELETE().WHERE(Sources.ID.EQ(String(req.ID.UUID.String())))
 	if _, err := stmt.ExecContext(ctx, s.db); err != nil {
-		return fmt.Errorf("delete source: %w", err)
+		return DeleteSourceResponse{}, huma.Error500InternalServerError("failed to delete source", err)
 	}
 
-	return nil
+	return DeleteSourceResponse{}, nil
 }

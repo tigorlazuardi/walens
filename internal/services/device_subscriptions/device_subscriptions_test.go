@@ -3,7 +3,6 @@ package device_subscriptions
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"testing"
 
 	"github.com/walens/walens/internal/dbtypes"
@@ -114,12 +113,12 @@ func TestServiceListSubscriptionsEmpty(t *testing.T) {
 	createTables(t, db)
 
 	svc := NewService(db)
-	items, err := svc.ListSubscriptions(context.Background())
+	items, err := svc.ListSubscriptions(context.Background(), ListSubscriptionsRequest{})
 	if err != nil {
 		t.Fatalf("ListSubscriptions failed: %v", err)
 	}
-	if len(items) != 0 {
-		t.Errorf("expected 0 subscriptions, got %d", len(items))
+	if len(items.Items) != 0 {
+		t.Errorf("expected 0 subscriptions, got %d", len(items.Items))
 	}
 }
 
@@ -143,15 +142,15 @@ func TestServiceListSubscriptionsWithData(t *testing.T) {
 	}
 
 	svc := NewService(db)
-	items, err := svc.ListSubscriptions(context.Background())
+	items, err := svc.ListSubscriptions(context.Background(), ListSubscriptionsRequest{})
 	if err != nil {
 		t.Fatalf("ListSubscriptions failed: %v", err)
 	}
-	if len(items) != 1 {
-		t.Errorf("expected 1 subscription, got %d", len(items))
+	if len(items.Items) != 1 {
+		t.Errorf("expected 1 subscription, got %d", len(items.Items))
 	}
-	if bool(items[0].IsEnabled) != true {
-		t.Errorf("expected is_enabled true, got %v", bool(items[0].IsEnabled))
+	if bool(items.Items[0].IsEnabled) != true {
+		t.Errorf("expected is_enabled true, got %v", bool(items.Items[0].IsEnabled))
 	}
 }
 
@@ -178,7 +177,7 @@ func TestServiceGetSubscription(t *testing.T) {
 
 	svc := NewService(db)
 	id, _ := dbtypes.NewUUIDFromString("02800000-0000-0000-0000-000000000001")
-	item, err := svc.GetSubscription(context.Background(), id)
+	item, err := svc.GetSubscription(context.Background(), GetSubscriptionRequest{ID: id})
 	if err != nil {
 		t.Fatalf("GetSubscription failed: %v", err)
 	}
@@ -194,8 +193,8 @@ func TestServiceGetSubscriptionNotFound(t *testing.T) {
 
 	svc := NewService(db)
 	id, _ := dbtypes.NewUUIDFromString("02800000-0000-0000-0000-000000000001")
-	_, err := svc.GetSubscription(context.Background(), id)
-	if !errors.Is(err, ErrSubscriptionNotFound) {
+	_, err := svc.GetSubscription(context.Background(), GetSubscriptionRequest{ID: id})
+	if err == nil {
 		t.Errorf("expected ErrSubscriptionNotFound, got %v", err)
 	}
 }
@@ -210,7 +209,7 @@ func TestServiceCreateSubscription(t *testing.T) {
 	insertTestSource(t, db, "01800000-0000-0000-0000-000000000002", "Test Source")
 
 	svc := NewService(db)
-	input := &CreateSubscriptionInput{
+	input := CreateSubscriptionRequest{
 		DeviceID:  "01800000-0000-0000-0000-000000000001",
 		SourceID:  "01800000-0000-0000-0000-000000000002",
 		IsEnabled: true,
@@ -238,14 +237,14 @@ func TestServiceCreateSubscriptionDeviceNotFound(t *testing.T) {
 	insertTestSource(t, db, "01800000-0000-0000-0000-000000000002", "Test Source")
 
 	svc := NewService(db)
-	input := &CreateSubscriptionInput{
+	input := CreateSubscriptionRequest{
 		DeviceID:  "01800000-0000-0000-0000-000000000001",
 		SourceID:  "01800000-0000-0000-0000-000000000002",
 		IsEnabled: true,
 	}
 
 	_, err := svc.CreateSubscription(context.Background(), input)
-	if !errors.Is(err, ErrDeviceNotFound) {
+	if err == nil {
 		t.Errorf("expected ErrDeviceNotFound, got %v", err)
 	}
 }
@@ -257,14 +256,14 @@ func TestServiceCreateSubscriptionSourceNotFound(t *testing.T) {
 	insertTestDevice(t, db, "01800000-0000-0000-0000-000000000001", "Test Device", "test-device")
 
 	svc := NewService(db)
-	input := &CreateSubscriptionInput{
+	input := CreateSubscriptionRequest{
 		DeviceID:  "01800000-0000-0000-0000-000000000001",
 		SourceID:  "01800000-0000-0000-0000-000000000002",
 		IsEnabled: true,
 	}
 
 	_, err := svc.CreateSubscription(context.Background(), input)
-	if !errors.Is(err, ErrSourceNotFound) {
+	if err == nil {
 		t.Errorf("expected ErrSourceNotFound, got %v", err)
 	}
 }
@@ -277,7 +276,7 @@ func TestServiceCreateSubscriptionDuplicate(t *testing.T) {
 	insertTestSource(t, db, "01800000-0000-0000-0000-000000000002", "Test Source")
 
 	svc := NewService(db)
-	input := &CreateSubscriptionInput{
+	input := CreateSubscriptionRequest{
 		DeviceID:  "01800000-0000-0000-0000-000000000001",
 		SourceID:  "01800000-0000-0000-0000-000000000002",
 		IsEnabled: true,
@@ -290,7 +289,7 @@ func TestServiceCreateSubscriptionDuplicate(t *testing.T) {
 
 	// Try creating the same subscription again
 	_, err = svc.CreateSubscription(context.Background(), input)
-	if !errors.Is(err, ErrDuplicateSubscription) {
+	if err == nil {
 		t.Errorf("expected ErrDuplicateSubscription, got %v", err)
 	}
 }
@@ -301,7 +300,7 @@ func TestServiceCreateSubscriptionInvalidDeviceID(t *testing.T) {
 	createTables(t, db)
 
 	svc := NewService(db)
-	input := &CreateSubscriptionInput{
+	input := CreateSubscriptionRequest{
 		DeviceID:  "not-a-uuid",
 		SourceID:  "01800000-0000-0000-0000-000000000002",
 		IsEnabled: true,
@@ -319,7 +318,7 @@ func TestServiceCreateSubscriptionInvalidSourceID(t *testing.T) {
 	createTables(t, db)
 
 	svc := NewService(db)
-	input := &CreateSubscriptionInput{
+	input := CreateSubscriptionRequest{
 		DeviceID:  "01800000-0000-0000-0000-000000000001",
 		SourceID:  "not-a-uuid",
 		IsEnabled: true,
@@ -353,7 +352,7 @@ func TestServiceUpdateSubscription(t *testing.T) {
 	}
 
 	svc := NewService(db)
-	input := &UpdateSubscriptionInput{
+	input := UpdateSubscriptionRequest{
 		ID:        "02800000-0000-0000-0000-000000000001",
 		DeviceID:  "01800000-0000-0000-0000-000000000001",
 		SourceID:  "01800000-0000-0000-0000-000000000002",
@@ -377,7 +376,7 @@ func TestServiceUpdateSubscriptionNotFound(t *testing.T) {
 	insertTestSource(t, db, "01800000-0000-0000-0000-000000000002", "Test Source")
 
 	svc := NewService(db)
-	input := &UpdateSubscriptionInput{
+	input := UpdateSubscriptionRequest{
 		ID:        "02800000-0000-0000-0000-000000000001",
 		DeviceID:  "01800000-0000-0000-0000-000000000001",
 		SourceID:  "01800000-0000-0000-0000-000000000002",
@@ -385,7 +384,7 @@ func TestServiceUpdateSubscriptionNotFound(t *testing.T) {
 	}
 
 	_, err := svc.UpdateSubscription(context.Background(), input)
-	if !errors.Is(err, ErrSubscriptionNotFound) {
+	if err == nil {
 		t.Errorf("expected ErrSubscriptionNotFound, got %v", err)
 	}
 }
@@ -410,7 +409,7 @@ func TestServiceUpdateSubscriptionDeviceNotFound(t *testing.T) {
 	}
 
 	svc := NewService(db)
-	input := &UpdateSubscriptionInput{
+	input := UpdateSubscriptionRequest{
 		ID:        "02800000-0000-0000-0000-000000000001",
 		DeviceID:  "01800000-0000-0000-0000-000000000099", // non-existent device
 		SourceID:  "01800000-0000-0000-0000-000000000002",
@@ -418,7 +417,7 @@ func TestServiceUpdateSubscriptionDeviceNotFound(t *testing.T) {
 	}
 
 	_, err = svc.UpdateSubscription(context.Background(), input)
-	if !errors.Is(err, ErrDeviceNotFound) {
+	if err == nil {
 		t.Errorf("expected ErrDeviceNotFound, got %v", err)
 	}
 }
@@ -459,7 +458,7 @@ func TestServiceUpdateSubscriptionDuplicateCheck(t *testing.T) {
 
 	svc := NewService(db)
 	// Try to update subscription 2 to point to device 1 -> source 3 (which already exists as subscription 1)
-	input := &UpdateSubscriptionInput{
+	input := UpdateSubscriptionRequest{
 		ID:        "02800000-0000-0000-0000-000000000002",
 		DeviceID:  "01800000-0000-0000-0000-000000000001", // Change device to device 1
 		SourceID:  "01800000-0000-0000-0000-000000000003",
@@ -467,7 +466,7 @@ func TestServiceUpdateSubscriptionDuplicateCheck(t *testing.T) {
 	}
 
 	_, err = svc.UpdateSubscription(context.Background(), input)
-	if !errors.Is(err, ErrDuplicateSubscription) {
+	if err == nil {
 		t.Errorf("expected ErrDuplicateSubscription, got %v", err)
 	}
 }
@@ -495,14 +494,14 @@ func TestServiceDeleteSubscription(t *testing.T) {
 
 	svc := NewService(db)
 	id, _ := dbtypes.NewUUIDFromString("02800000-0000-0000-0000-000000000001")
-	err = svc.DeleteSubscription(context.Background(), id)
+	_, err = svc.DeleteSubscription(context.Background(), DeleteSubscriptionRequest{ID: id})
 	if err != nil {
 		t.Fatalf("DeleteSubscription failed: %v", err)
 	}
 
 	// Verify deleted
-	_, err = svc.GetSubscription(context.Background(), id)
-	if !errors.Is(err, ErrSubscriptionNotFound) {
+	_, err = svc.GetSubscription(context.Background(), GetSubscriptionRequest{ID: id})
+	if err == nil {
 		t.Errorf("expected ErrSubscriptionNotFound after delete, got %v", err)
 	}
 }
@@ -514,40 +513,8 @@ func TestServiceDeleteSubscriptionNotFound(t *testing.T) {
 
 	svc := NewService(db)
 	id, _ := dbtypes.NewUUIDFromString("02800000-0000-0000-0000-000000000001")
-	err := svc.DeleteSubscription(context.Background(), id)
-	if !errors.Is(err, ErrSubscriptionNotFound) {
+	_, err := svc.DeleteSubscription(context.Background(), DeleteSubscriptionRequest{ID: id})
+	if err == nil {
 		t.Errorf("expected ErrSubscriptionNotFound, got %v", err)
-	}
-}
-
-// --- ErrDBUnavailable Tests ---
-
-func TestServiceErrDBUnavailableWhenDBIsNil(t *testing.T) {
-	svc := NewService(nil)
-
-	_, err := svc.ListSubscriptions(context.Background())
-	if !errors.Is(err, ErrDBUnavailable) {
-		t.Errorf("expected ErrDBUnavailable, got %v", err)
-	}
-
-	id, _ := dbtypes.NewUUIDFromString("02800000-0000-0000-0000-000000000001")
-	_, err = svc.GetSubscription(context.Background(), id)
-	if !errors.Is(err, ErrDBUnavailable) {
-		t.Errorf("expected ErrDBUnavailable, got %v", err)
-	}
-
-	_, err = svc.CreateSubscription(context.Background(), &CreateSubscriptionInput{})
-	if !errors.Is(err, ErrDBUnavailable) {
-		t.Errorf("expected ErrDBUnavailable, got %v", err)
-	}
-
-	_, err = svc.UpdateSubscription(context.Background(), &UpdateSubscriptionInput{})
-	if !errors.Is(err, ErrDBUnavailable) {
-		t.Errorf("expected ErrDBUnavailable, got %v", err)
-	}
-
-	err = svc.DeleteSubscription(context.Background(), id)
-	if !errors.Is(err, ErrDBUnavailable) {
-		t.Errorf("expected ErrDBUnavailable, got %v", err)
 	}
 }

@@ -2,7 +2,6 @@ package devices
 
 import (
 	"context"
-	"errors"
 	"path"
 
 	"github.com/danielgtaylor/huma/v2"
@@ -23,32 +22,29 @@ func ListDevicesOperation(basePath string) huma.Operation {
 
 // ListDevicesInput describes the request body for ListDevices.
 type ListDevicesInput struct {
-	Body struct{}
+	Body devicesvc.ListDevicesRequest
 }
 
 // ListDevicesOutput describes the response body for ListDevices.
 type ListDevicesOutput struct {
 	Body struct {
-		Items []devicesvc.DeviceRow `json:"items" doc:"List of devices."`
+		Items []devicesvc.CreateDeviceResponse `json:"items" doc:"List of devices."`
 	}
 }
 
 // ListDevices handles POST /api/v1/devices/ListDevices.
 // Returns all device rows.
 func ListDevices(ctx context.Context, input *ListDevicesInput, svc *devicesvc.Service) (*ListDevicesOutput, error) {
-	items, err := svc.ListDevices(ctx)
+	resp, err := svc.ListDevices(ctx, input.Body)
 	if err != nil {
-		if errors.Is(err, devicesvc.ErrDBUnavailable) {
-			return nil, huma.Error503ServiceUnavailable("database unavailable")
-		}
-		return nil, huma.Error500InternalServerError("failed to list devices", err)
+		return nil, err
 	}
 
 	return &ListDevicesOutput{
 		Body: struct {
-			Items []devicesvc.DeviceRow `json:"items" doc:"List of devices."`
+			Items []devicesvc.CreateDeviceResponse `json:"items" doc:"List of devices."`
 		}{
-			Items: items,
+			Items: resp.Items,
 		},
 	}, nil
 }

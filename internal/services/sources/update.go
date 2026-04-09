@@ -3,14 +3,16 @@ package sources
 import (
 	"context"
 	"encoding/json"
-	"fmt"
+	"errors"
 
+	"github.com/danielgtaylor/huma/v2"
 	. "github.com/go-jet/jet/v2/sqlite"
+	"github.com/walens/walens/internal/db/generated/model"
 	. "github.com/walens/walens/internal/db/generated/table"
 	"github.com/walens/walens/internal/dbtypes"
 )
 
-type UpdateSourceInput struct {
+type UpdateSourceRequest struct {
 	ID          dbtypes.UUID     `json:"id" doc:"Unique source identifier."`
 	Name        *string          `json:"name,omitempty" doc:"Unique human-readable source name."`
 	SourceType  *string          `json:"source_type,omitempty" doc:"Registered source implementation name."`
@@ -19,54 +21,61 @@ type UpdateSourceInput struct {
 	IsEnabled   *bool            `json:"is_enabled,omitempty" doc:"Whether this source is active."`
 }
 
-// UpdateSource updates an existing source with full-object update semantics.
-func (s *Service) UpdateSource(ctx context.Context, input *UpdateSourceInput) (*SourceRow, error) {
-	if s.db == nil {
-		return nil, ErrDBUnavailable
-	}
+type UpdateSourceResponse = model.Sources
 
-	existing, err := s.GetSource(ctx, input.ID)
+// UpdateSource updates an existing source with full-object update semantics.
+func (s *Service) UpdateSource(ctx context.Context, req UpdateSourceRequest) (UpdateSourceResponse, error) {
+	existing, err := s.GetSource(ctx, GetSourceRequest{ID: req.ID})
 	if err != nil {
-		return nil, err
+		return UpdateSourceResponse{}, err
 	}
 
 	mergedName := existing.Name
-	if input.Name != nil {
-		mergedName = *input.Name
+	if req.Name != nil {
+		mergedName = *req.Name
 	}
 	mergedSourceType := existing.SourceType
-	if input.SourceType != nil {
-		mergedSourceType = *input.SourceType
+	if req.SourceType != nil {
+		mergedSourceType = *req.SourceType
 	}
 	mergedParams := existing.Params
-	if input.Params != nil {
-		mergedParams = dbtypes.RawJSON(*input.Params)
+	if req.Params != nil {
+		mergedParams = dbtypes.RawJSON(*req.Params)
 	}
 	mergedLookupCount := existing.LookupCount
-	if input.LookupCount != nil {
-		mergedLookupCount = *input.LookupCount
+	if req.LookupCount != nil {
+		mergedLookupCount = *req.LookupCount
 	}
 	mergedIsEnabled := existing.IsEnabled
-	if input.IsEnabled != nil {
-		mergedIsEnabled = dbtypes.BoolInt(*input.IsEnabled)
+	if req.IsEnabled != nil {
+		mergedIsEnabled = dbtypes.BoolInt(*req.IsEnabled)
 	}
 
 	if err := s.validateSourceType(mergedSourceType, json.RawMessage(mergedParams)); err != nil {
-		return nil, err
+		if errors.Is(err, ErrRegistryUnavailable) {
+			return UpdateSourceResponse{}, huma.Error503ServiceUnavailable("source registry unavailable", err)
+		}
+		if errors.Is(err, ErrInvalidSourceType) {
+			return UpdateSourceResponse{}, huma.Error400BadRequest("invalid source type: not registered", err)
+		}
+		if errors.Is(err, ErrInvalidParams) {
+			return UpdateSourceResponse{}, huma.Error400BadRequest("invalid params for source type", err)
+		}
+		return UpdateSourceResponse{}, huma.Error500InternalServerError("failed to validate source type", err)
 	}
 
 	duplicateCount, err := s.countSources(ctx,
 		Sources.Name.EQ(String(mergedName)).
-			AND(Sources.ID.NOT_EQ(String(input.ID.UUID.String()))),
+			AND(Sources.ID.NOT_EQ(String(req.ID.UUID.String()))),
 	)
 	if err != nil {
-		return nil, fmt.Errorf("check duplicate name: %w", err)
+		return UpdateSourceResponse{}, huma.Error500InternalServerError("failed to check duplicate source name", err)
 	}
 	if duplicateCount > 0 {
-		return nil, ErrDuplicateSourceName
+		return UpdateSourceResponse{}, huma.Error409Conflict("source with this name already exists", ErrDuplicateSourceName)
 	}
 
-	updated := *existing
+	updated := existing
 	updated.Name = mergedName
 	updated.SourceType = mergedSourceType
 	updated.Params = mergedParams
@@ -82,12 +91,12 @@ func (s *Service) UpdateSource(ctx context.Context, input *UpdateSourceInput) (*
 		Sources.IsEnabled,
 		Sources.UpdatedAt,
 	).MODEL(updated).WHERE(
-		Sources.ID.EQ(String(input.ID.UUID.String())),
+		Sources.ID.EQ(String(req.ID.UUID.String())),
 	)
 
 	if _, err := stmt.ExecContext(ctx, s.db); err != nil {
-		return nil, fmt.Errorf("update source: %w", err)
+		return UpdateSourceResponse{}, huma.Error500InternalServerError("failed to update source", err)
 	}
 
-	return s.GetSource(ctx, input.ID)
+	return s.GetSource(ctx, GetSourceRequest{ID: req.ID})
 }
