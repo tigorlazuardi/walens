@@ -3,6 +3,7 @@ package images
 import (
 	"context"
 	"slices"
+	"strings"
 
 	"github.com/danielgtaylor/huma/v2"
 	. "github.com/go-jet/jet/v2/sqlite"
@@ -14,21 +15,17 @@ import (
 
 // ListImagesRequest describes filters for listing images.
 type ListImagesRequest struct {
-	Adult                *bool                            `json:"adult" doc:"Filter by adult flag"`
-	Favorite             *bool                            `json:"favorite" doc:"Filter by favorite flag"`
-	MinWidth             *int64                           `json:"min_width" doc:"Minimum image width in pixels"`
-	MaxWidth             *int64                           `json:"max_width" doc:"Maximum image width in pixels"`
-	MinHeight            *int64                           `json:"min_height" doc:"Minimum image height in pixels"`
-	MaxHeight            *int64                           `json:"max_height" doc:"Maximum image height in pixels"`
-	MinFileSizeBytes     *int64                           `json:"min_file_size_bytes" doc:"Minimum file size in bytes"`
-	MaxFileSizeBytes     *int64                           `json:"max_file_size_bytes" doc:"Maximum file size in bytes"`
-	Uploader             *string                          `json:"uploader" doc:"Filter by uploader name (LIKE pattern)"`
-	Artist               *string                          `json:"artist" doc:"Filter by artist name (LIKE pattern)"`
-	OriginURL            *string                          `json:"origin_url" doc:"Filter by origin URL (LIKE pattern)"`
-	SourceItemIdentifier *string                          `json:"source_item_identifier" doc:"Filter by source item identifier (LIKE pattern)"`
-	TagNames             []string                         `json:"tag_names" doc:"Filter by tag names (ANY match)"`
-	SourceIDs            []dbtypes.UUID                   `json:"source_ids" doc:"Filter by source IDs"`
-	Pagination           *dbtypes.CursorPaginationRequest `json:"pagination"`
+	Adult            *bool                            `json:"adult" doc:"Filter by adult flag"`
+	Favorite         *bool                            `json:"favorite" doc:"Filter by favorite flag"`
+	MinWidth         *int64                           `json:"min_width" doc:"Minimum image width in pixels"`
+	MaxWidth         *int64                           `json:"max_width" doc:"Maximum image width in pixels"`
+	MinHeight        *int64                           `json:"min_height" doc:"Minimum image height in pixels"`
+	MaxHeight        *int64                           `json:"max_height" doc:"Maximum image height in pixels"`
+	MinFileSizeBytes *int64                           `json:"min_file_size_bytes" doc:"Minimum file size in bytes"`
+	MaxFileSizeBytes *int64                           `json:"max_file_size_bytes" doc:"Maximum file size in bytes"`
+	Search           *string                          `json:"search" doc:"Search uploader, artist, origin URL, source item identifier, and tags"`
+	SourceIDs        []dbtypes.UUID                   `json:"source_ids" doc:"Filter by source IDs"`
+	Pagination       *dbtypes.CursorPaginationRequest `json:"pagination"`
 }
 
 // ListImagesResponse returns the paginated list of images.
@@ -84,24 +81,6 @@ func (s *Service) ListImages(ctx context.Context, req ListImagesRequest) (ListIm
 		cond = cond.AND(Images.FileSizeBytes.LT_EQ(Int64(*req.MaxFileSizeBytes)))
 	}
 
-	// LIKE-style text filters
-	if req.Uploader != nil && *req.Uploader != "" {
-		pattern := String("%" + *req.Uploader + "%")
-		cond = cond.AND(Images.Uploader.LIKE(pattern))
-	}
-	if req.Artist != nil && *req.Artist != "" {
-		pattern := String("%" + *req.Artist + "%")
-		cond = cond.AND(Images.Artist.LIKE(pattern))
-	}
-	if req.OriginURL != nil && *req.OriginURL != "" {
-		pattern := String("%" + *req.OriginURL + "%")
-		cond = cond.AND(Images.OriginURL.LIKE(pattern))
-	}
-	if req.SourceItemIdentifier != nil && *req.SourceItemIdentifier != "" {
-		pattern := String("%" + *req.SourceItemIdentifier + "%")
-		cond = cond.AND(Images.SourceItemIdentifier.LIKE(pattern))
-	}
-
 	// Source IDs filter
 	if len(req.SourceIDs) > 0 {
 		sourceIDCond := Images.SourceID.EQ(String(req.SourceIDs[0].UUID.String()))
@@ -111,29 +90,31 @@ func (s *Service) ListImages(ctx context.Context, req ListImagesRequest) (ListIm
 		cond = cond.AND(sourceIDCond)
 	}
 
-	// Tag filter - ANY match through image_tags join
-	// Normalize and deduplicate tag names, skipping blanks
-	normalizedTags := make([]string, 0, len(req.TagNames))
-	seen := make(map[string]struct{}, len(req.TagNames))
-	for _, tagName := range req.TagNames {
-		normalized := tags.NormalizeTag(tagName)
-		if normalized == "" {
-			continue
+	// Search filter - matches uploader, artist, origin URL, source item identifier, or tags
+	if req.Search != nil {
+		searchTerm := strings.TrimSpace(*req.Search)
+		if searchTerm != "" {
+			// Build LIKE pattern for text fields
+			pattern := String("%" + searchTerm + "%")
+
+			// Build tag LIKE pattern using normalized name
+			normalizedSearch := tags.NormalizeTag(searchTerm)
+			tagPattern := String("%" + normalizedSearch + "%")
+
+			// Tag subquery with LIKE on normalized_name
+			tagLikeSubquery := SELECT(ImageTags.ImageID).
+				FROM(ImageTags.INNER_JOIN(Tags, ImageTags.TagID.EQ(Tags.ID))).
+				WHERE(Tags.NormalizedName.LIKE(tagPattern))
+
+			// OR across all search fields
+			searchCond := Images.Uploader.LIKE(pattern).
+				OR(Images.Artist.LIKE(pattern)).
+				OR(Images.OriginURL.LIKE(pattern)).
+				OR(Images.SourceItemIdentifier.LIKE(pattern)).
+				OR(Images.ID.IN(tagLikeSubquery))
+
+			cond = cond.AND(searchCond)
 		}
-		if _, ok := seen[normalized]; !ok {
-			seen[normalized] = struct{}{}
-			normalizedTags = append(normalizedTags, normalized)
-		}
-	}
-	if len(normalizedTags) > 0 {
-		tagCond := Tags.NormalizedName.EQ(String(normalizedTags[0]))
-		for i := 1; i < len(normalizedTags); i++ {
-			tagCond = tagCond.OR(Tags.NormalizedName.EQ(String(normalizedTags[i])))
-		}
-		tagStmt := SELECT(ImageTags.ImageID).
-			FROM(ImageTags.INNER_JOIN(Tags, ImageTags.TagID.EQ(Tags.ID))).
-			WHERE(tagCond)
-		cond = cond.AND(Images.ID.IN(tagStmt))
 	}
 
 	// Pagination
