@@ -4,6 +4,9 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"image"
+	"image/color"
+	"image/jpeg"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -148,6 +151,16 @@ func createTables(t *testing.T, db *sql.DB) {
 			image_id TEXT NOT NULL,
 			tag_id TEXT NOT NULL,
 			created_at INTEGER NOT NULL
+		)`,
+		`CREATE TABLE image_thumbnails (
+			id TEXT PRIMARY KEY,
+			image_id TEXT NOT NULL,
+			path TEXT NOT NULL,
+			width INTEGER NOT NULL,
+			height INTEGER NOT NULL,
+			file_size_bytes INTEGER,
+			created_at INTEGER NOT NULL,
+			updated_at INTEGER NOT NULL
 		)`,
 	}
 
@@ -1112,5 +1125,263 @@ func TestTagsPersistence_DedupeCaseInsensitive(t *testing.T) {
 	}
 	if imageTagCount != 1 {
 		t.Errorf("expected 1 image_tag (deduped), got %d", imageTagCount)
+	}
+}
+
+// createTestJPEGFile creates a minimal valid JPEG file at the given path.
+func createTestJPEGFile(path string, width, height int) error {
+	// Create a simple image
+	img := image.NewRGBA(image.Rect(0, 0, width, height))
+	// Fill with a simple color to make it recognizable
+	for y := 0; y < height; y++ {
+		for x := 0; x < width; x++ {
+			img.Set(x, y, color.RGBA{R: 128, G: 64, B: 192, A: 255})
+		}
+	}
+
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return err
+	}
+
+	file, err := os.Create(path)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	return jpeg.Encode(file, img, &jpeg.Options{Quality: 85})
+}
+
+// TestThumbnail_CreatesThumbnailRow tests that materialization creates a thumbnail row
+// when a canonical file exists.
+func TestThumbnail_CreatesThumbnailRow(t *testing.T) {
+	db := openTestDB(t)
+	defer db.Close()
+	createTables(t, db)
+
+	ts := newTestStorage(t)
+	defer ts.cleanup()
+
+	ctx := context.Background()
+
+	// Setup: Create device, source, image, and location with existing JPEG file
+	deviceID := dbtypes.MustNewUUIDV7()
+	sourceID := dbtypes.MustNewUUIDV7()
+	imageID := dbtypes.MustNewUUIDV7()
+	locationID := dbtypes.MustNewUUIDV7()
+	assignmentID := dbtypes.MustNewUUIDV7()
+
+	insertTestDevice(t, db, deviceID.UUID.String(), "Test Device", "test-device")
+	insertTestSource(t, db, sourceID.UUID.String(), "test-source")
+	insertTestImage(t, db, imageID.UUID.String(), sourceID.UUID.String(), "thumb-test-img", "mock")
+	insertTestImageAssignment(t, db, assignmentID.UUID.String(), imageID.UUID.String(), deviceID.UUID.String())
+
+	// Create a real JPEG file for the canonical location
+	existingPath := filepath.Join(ts.tempDir, "images", "test-device", "thumb-test-img.jpg")
+	if err := createTestJPEGFile(existingPath, 1920, 1080); err != nil {
+		t.Fatalf("create test JPEG: %v", err)
+	}
+	insertTestImageLocation(t, db, locationID.UUID.String(), imageID.UUID.String(), deviceID.UUID.String(), existingPath, StorageKindCanonical, true)
+
+	// Setup materializer
+	mat := NewMaterializer(slog.New(slog.DiscardHandler))
+	mat.SetStorageService(ts.Service)
+	mat.SetImageService(images.NewService(db))
+
+	// Create source that yields the image
+	src := &mockSource{
+		items: []sources.ImageMetadata{
+			{UniqueIdentifier: "thumb-test-img", OriginURL: "http://example.com/thumb.jpg", MimeType: "image/jpeg"},
+		},
+	}
+
+	req := MaterializeRequest{
+		SourceID:    sourceID,
+		SourceType:  "mock",
+		LookupCount: 10,
+		Devices:     []model.Devices{{ID: &deviceID, Slug: "test-device"}},
+	}
+
+	result, err := mat.MaterializeImage(ctx, req, src)
+	if err != nil {
+		t.Fatalf("MaterializeImage failed: %v", err)
+	}
+
+	// Verify: Image should be skipped (Rule 1)
+	if result.SkippedCount != 1 {
+		t.Errorf("expected SkippedCount=1, got %d", result.SkippedCount)
+	}
+
+	// Verify: Thumbnail row should be created
+	var thumbCount int
+	err = db.QueryRow("SELECT COUNT(*) FROM image_thumbnails WHERE image_id = ?", imageID.UUID.String()).Scan(&thumbCount)
+	if err != nil {
+		t.Fatalf("count thumbnails: %v", err)
+	}
+	if thumbCount != 1 {
+		t.Errorf("expected 1 thumbnail row, got %d", thumbCount)
+	}
+
+	// Verify: Thumbnail file should exist on disk
+	var thumbPath string
+	err = db.QueryRow("SELECT path FROM image_thumbnails WHERE image_id = ?", imageID.UUID.String()).Scan(&thumbPath)
+	if err != nil {
+		t.Fatalf("get thumbnail path: %v", err)
+	}
+	if !ts.FileExists(thumbPath) {
+		t.Errorf("expected thumbnail file to exist at %s", thumbPath)
+	}
+}
+
+// TestThumbnail_NoDuplicateRows tests that repeated processing does not create
+// duplicate thumbnail rows.
+func TestThumbnail_NoDuplicateRows(t *testing.T) {
+	db := openTestDB(t)
+	defer db.Close()
+	createTables(t, db)
+
+	ts := newTestStorage(t)
+	defer ts.cleanup()
+
+	ctx := context.Background()
+
+	// Setup: Create device, source, image, and location with existing JPEG file
+	deviceID := dbtypes.MustNewUUIDV7()
+	sourceID := dbtypes.MustNewUUIDV7()
+	imageID := dbtypes.MustNewUUIDV7()
+	locationID := dbtypes.MustNewUUIDV7()
+	assignmentID := dbtypes.MustNewUUIDV7()
+
+	insertTestDevice(t, db, deviceID.UUID.String(), "Test Device", "test-device")
+	insertTestSource(t, db, sourceID.UUID.String(), "test-source")
+	insertTestImage(t, db, imageID.UUID.String(), sourceID.UUID.String(), "dup-thumb-test", "mock")
+	insertTestImageAssignment(t, db, assignmentID.UUID.String(), imageID.UUID.String(), deviceID.UUID.String())
+
+	// Create a real JPEG file
+	existingPath := filepath.Join(ts.tempDir, "images", "test-device", "dup-thumb-test.jpg")
+	if err := createTestJPEGFile(existingPath, 1920, 1080); err != nil {
+		t.Fatalf("create test JPEG: %v", err)
+	}
+	insertTestImageLocation(t, db, locationID.UUID.String(), imageID.UUID.String(), deviceID.UUID.String(), existingPath, StorageKindCanonical, true)
+
+	// Setup materializer
+	mat := NewMaterializer(slog.New(slog.DiscardHandler))
+	mat.SetStorageService(ts.Service)
+	mat.SetImageService(images.NewService(db))
+
+	// Create source that yields the image
+	src := &mockSource{
+		items: []sources.ImageMetadata{
+			{UniqueIdentifier: "dup-thumb-test", OriginURL: "http://example.com/dup.jpg", MimeType: "image/jpeg"},
+		},
+	}
+
+	req := MaterializeRequest{
+		SourceID:    sourceID,
+		SourceType:  "mock",
+		LookupCount: 10,
+		Devices:     []model.Devices{{ID: &deviceID, Slug: "test-device"}},
+	}
+
+	// Process the image once
+	_, err := mat.MaterializeImage(ctx, req, src)
+	if err != nil {
+		t.Fatalf("MaterializeImage failed: %v", err)
+	}
+
+	// Process the image again
+	_, err = mat.MaterializeImage(ctx, req, src)
+	if err != nil {
+		t.Fatalf("MaterializeImage failed (second run): %v", err)
+	}
+
+	// Verify: Only 1 thumbnail row should exist
+	var thumbCount int
+	err = db.QueryRow("SELECT COUNT(*) FROM image_thumbnails WHERE image_id = ?", imageID.UUID.String()).Scan(&thumbCount)
+	if err != nil {
+		t.Fatalf("count thumbnails: %v", err)
+	}
+	if thumbCount != 1 {
+		t.Errorf("expected 1 thumbnail row after duplicate processing, got %d", thumbCount)
+	}
+}
+
+// TestThumbnail_UsesCanonicalFile tests that thumbnail is generated from canonical file
+// when available.
+func TestThumbnail_UsesCanonicalFile(t *testing.T) {
+	db := openTestDB(t)
+	defer db.Close()
+	createTables(t, db)
+
+	ts := newTestStorage(t)
+	defer ts.cleanup()
+
+	ctx := context.Background()
+
+	// Setup: Two devices, device A has canonical file, device B will hard link
+	deviceAID := dbtypes.MustNewUUIDV7()
+	deviceBID := dbtypes.MustNewUUIDV7()
+	sourceID := dbtypes.MustNewUUIDV7()
+	imageID := dbtypes.MustNewUUIDV7()
+	locationAID := dbtypes.MustNewUUIDV7()
+	assignmentAID := dbtypes.MustNewUUIDV7()
+
+	insertTestDevice(t, db, deviceAID.UUID.String(), "Device A", "device-a")
+	insertTestDevice(t, db, deviceBID.UUID.String(), "Device B", "device-b")
+	insertTestSource(t, db, sourceID.UUID.String(), "test-source")
+	insertTestImage(t, db, imageID.UUID.String(), sourceID.UUID.String(), "canonical-thumb-test", "mock")
+	insertTestImageAssignment(t, db, assignmentAID.UUID.String(), imageID.UUID.String(), deviceAID.UUID.String())
+
+	// Create a real JPEG file for device A (canonical)
+	canonicalPath := filepath.Join(ts.tempDir, "images", "device-a", "canonical-thumb-test.jpg")
+	if err := createTestJPEGFile(canonicalPath, 1920, 1080); err != nil {
+		t.Fatalf("create test JPEG: %v", err)
+	}
+	insertTestImageLocation(t, db, locationAID.UUID.String(), imageID.UUID.String(), deviceAID.UUID.String(), canonicalPath, StorageKindCanonical, true)
+
+	// Setup materializer
+	mat := NewMaterializer(slog.New(slog.DiscardHandler))
+	mat.SetStorageService(ts.Service)
+	mat.SetImageService(images.NewService(db))
+
+	// Create source that yields the image
+	src := &mockSource{
+		items: []sources.ImageMetadata{
+			{UniqueIdentifier: "canonical-thumb-test", OriginURL: "http://example.com/canonical.jpg", MimeType: "image/jpeg"},
+		},
+	}
+
+	// Process for both devices
+	req := MaterializeRequest{
+		SourceID:    sourceID,
+		SourceType:  "mock",
+		LookupCount: 10,
+		Devices:     []model.Devices{{ID: &deviceAID, Slug: "device-a"}, {ID: &deviceBID, Slug: "device-b"}},
+	}
+
+	_, err := mat.MaterializeImage(ctx, req, src)
+	if err != nil {
+		t.Fatalf("MaterializeImage failed: %v", err)
+	}
+
+	// Verify: Only 1 thumbnail row should exist
+	var thumbCount int
+	err = db.QueryRow("SELECT COUNT(*) FROM image_thumbnails WHERE image_id = ?", imageID.UUID.String()).Scan(&thumbCount)
+	if err != nil {
+		t.Fatalf("count thumbnails: %v", err)
+	}
+	if thumbCount != 1 {
+		t.Errorf("expected 1 thumbnail row, got %d", thumbCount)
+	}
+
+	// Verify: Device B got hard linked (Rule 3)
+	var hardlinkCount int
+	err = db.QueryRow("SELECT COUNT(*) FROM image_locations WHERE image_id = ? AND storage_kind = 'hardlink'", imageID.UUID.String()).Scan(&hardlinkCount)
+	if err != nil {
+		t.Fatalf("count hardlinks: %v", err)
+	}
+	if hardlinkCount != 1 {
+		t.Errorf("expected 1 hardlink location, got %d", hardlinkCount)
 	}
 }

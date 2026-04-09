@@ -159,6 +159,10 @@ func (m *Materializer) MaterializeImage(ctx context.Context, req MaterializeRequ
 		// Track if this image is newly created - we count new images toward StoredCount once
 		imageIsNew := isNewImage
 
+		// Track thumbnail generation state for this image to avoid regenerating
+		thumbnailGenerated := false
+		thumbnailSourcePath := ""
+
 		// Get existing locations for this image
 		existingLocations, err := m.imageSvc.GetImageLocations(ctx, *img.ID)
 		if err != nil && !errors.Is(err, images.ErrLocationNotFound) {
@@ -174,6 +178,12 @@ func (m *Materializer) MaterializeImage(ctx context.Context, req MaterializeRequ
 			if loc.StorageKind == StorageKindCanonical && bool(loc.IsActive) {
 				canonicalLocation = loc.Path
 			}
+		}
+
+		// Set default thumbnail source from existing canonical location if no Rule 1/2/4 sets it
+		// This handles Rule 3-only passes where the canonical already exists
+		if thumbnailSourcePath == "" && canonicalLocation != "" && m.storageSvc.FileExists(canonicalLocation) {
+			thumbnailSourcePath = canonicalLocation
 		}
 
 		// For each subscribed device, apply materialization rules
@@ -197,6 +207,10 @@ func (m *Materializer) MaterializeImage(ctx context.Context, req MaterializeRequ
 
 			if hasAssignment && hasFile {
 				// Rule 1: If image is assigned to device AND file exists → skip
+				// Use the existing device file as thumbnail source if we haven't set one yet
+				if !thumbnailGenerated && deviceLocation.Path != "" {
+					thumbnailSourcePath = deviceLocation.Path
+				}
 				result.SkippedCount++
 				m.logger.Debug("rule 1: assigned + file exists, skipping",
 					"device", device.Slug, "unique_id", uniqueID)
@@ -225,6 +239,11 @@ func (m *Materializer) MaterializeImage(ctx context.Context, req MaterializeRequ
 				})
 				if err != nil {
 					m.logger.Warn("failed to ensure location record", "error", err)
+				}
+
+				// Use newly downloaded canonical as thumbnail source if not already set
+				if !thumbnailGenerated {
+					thumbnailSourcePath = path
 				}
 				continue
 			}
@@ -304,10 +323,26 @@ func (m *Materializer) MaterializeImage(ctx context.Context, req MaterializeRequ
 				m.logger.Warn("failed to ensure location record", "error", err)
 			}
 
+			// Use newly downloaded canonical as thumbnail source if not already set
+			if !thumbnailGenerated {
+				thumbnailSourcePath = path
+			}
+
 			// Only count toward StoredCount if this image was newly created
 			if imageIsNew {
 				result.StoredCount++
 				imageIsNew = false // Only count once per image
+			}
+		}
+
+		// Ensure thumbnail exists after processing all devices
+		// Only generate if we have a source path and haven't generated yet
+		if thumbnailSourcePath != "" && !thumbnailGenerated {
+			if err := m.ensureThumbnail(ctx, *img.ID, thumbnailSourcePath); err != nil {
+				m.logger.Warn("failed to ensure thumbnail", "error", err, "image_id", img.ID.UUID.String())
+				// Continue processing - thumbnail failure should not fail the job
+			} else {
+				thumbnailGenerated = true
 			}
 		}
 	}
@@ -465,4 +500,44 @@ func ptrInt64(v int64) *int64 {
 
 func ptrFloat64(v float64) *float64 {
 	return &v
+}
+
+// ensureThumbnail generates and persists a thumbnail for an image if one doesn't exist.
+// It uses the provided sourcePath as the source image for thumbnail generation.
+// If thumbnail already exists on disk, it will be regenerated.
+// Thumbnail failures are logged but do not fail the operation.
+func (m *Materializer) ensureThumbnail(ctx context.Context, imageID dbtypes.UUID, sourcePath string) error {
+	if m.storageSvc == nil || m.imageSvc == nil {
+		return nil
+	}
+
+	// Check if thumbnail already exists in DB
+	existing, err := m.imageSvc.GetImageThumbnail(ctx, imageID)
+	if err != nil && !errors.Is(err, images.ErrThumbnailNotFound) {
+		return fmt.Errorf("check existing thumbnail: %w", err)
+	}
+
+	// If thumbnail row exists and file exists on disk, we still regenerate to ensure
+	// it's fresh (source might have been updated)
+	if existing == nil || !m.storageSvc.FileExists(m.storageSvc.ThumbnailPath(imageID)) {
+		// Generate thumbnail
+		result, err := m.storageSvc.GenerateThumbnail(sourcePath, imageID)
+		if err != nil {
+			return fmt.Errorf("generate thumbnail: %w", err)
+		}
+
+		// Persist thumbnail record
+		_, err = m.imageSvc.EnsureImageThumbnail(ctx, images.EnsureImageThumbnailRequest{
+			ImageID:       imageID,
+			Path:          result.Path,
+			Width:         result.Width,
+			Height:        result.Height,
+			FileSizeBytes: &result.FileSizeBytes,
+		})
+		if err != nil {
+			return fmt.Errorf("ensure thumbnail record: %w", err)
+		}
+	}
+
+	return nil
 }

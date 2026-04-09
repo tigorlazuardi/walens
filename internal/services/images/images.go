@@ -9,6 +9,7 @@ var (
 	ErrImageNotFound       = errors.New("image not found")
 	ErrAssignmentNotFound  = errors.New("image assignment not found")
 	ErrLocationNotFound    = errors.New("image location not found")
+	ErrThumbnailNotFound   = errors.New("image thumbnail not found")
 	ErrDeviceNotFound      = errors.New("device not found")
 	ErrNoSubscribedDevices = errors.New("no subscribed devices found")
 )
