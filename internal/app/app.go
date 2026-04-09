@@ -180,8 +180,13 @@ func (a *App) initDB() error {
 	a.runner.SetQueue(a.queue)
 	a.scheduler = scheduler.New(a.logger)
 
-	// Give scheduler access to DB for reload queries
+	// Give scheduler access to DB and jobs service for reload queries and job creation
 	a.scheduler.SetDB(a.db)
+	a.scheduler.SetJobsService(a.jobsService)
+	a.scheduler.SetEnqueueFunc(a.queue.Enqueue)
+
+	// Wire up scheduler reload to services that need it
+	a.sourcesService.SetScheduler(a.scheduler)
 
 	return nil
 }

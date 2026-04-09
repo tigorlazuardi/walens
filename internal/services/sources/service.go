@@ -22,12 +22,23 @@ var ErrInvalidParams = errors.New("invalid params for source type")
 type SourceRow = model.Sources
 
 type Service struct {
-	db       *sql.DB
-	registry *appsources.Registry
+	db        *sql.DB
+	registry  *appsources.Registry
+	scheduler SchedulerInterface
+}
+
+// SchedulerInterface defines the interface for scheduler reload
+type SchedulerInterface interface {
+	Reload() error
 }
 
 func NewService(db *sql.DB, registry *appsources.Registry) *Service {
 	return &Service{db: db, registry: registry}
+}
+
+// SetScheduler sets the scheduler for reload triggers.
+func (s *Service) SetScheduler(scheduler SchedulerInterface) {
+	s.scheduler = scheduler
 }
 
 func (s *Service) validateSourceType(sourceType string, params json.RawMessage) error {

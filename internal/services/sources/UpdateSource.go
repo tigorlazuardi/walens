@@ -98,5 +98,10 @@ func (s *Service) UpdateSource(ctx context.Context, req UpdateSourceRequest) (Up
 		return UpdateSourceResponse{}, huma.Error500InternalServerError("failed to update source", err)
 	}
 
+	// Trigger scheduler reload if enabled state changed
+	if req.IsEnabled != nil && s.scheduler != nil {
+		_ = s.scheduler.Reload()
+	}
+
 	return s.GetSource(ctx, GetSourceRequest{ID: req.ID})
 }
