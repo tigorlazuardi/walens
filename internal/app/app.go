@@ -178,6 +178,7 @@ func (a *App) initDB() error {
 	a.queue = queue.New(a.logger)
 	a.runner = runner.New(a.logger)
 	a.runner.SetQueue(a.queue)
+	a.runner.SetJobsService(a.jobsService)
 	a.scheduler = scheduler.New(a.logger)
 
 	// Give scheduler access to DB and jobs service for reload queries and job creation

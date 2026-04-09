@@ -7,17 +7,20 @@ import (
 	"sync"
 	"time"
 
+	"github.com/walens/walens/internal/dbtypes"
 	"github.com/walens/walens/internal/queue"
+	"github.com/walens/walens/internal/services/jobs"
 )
 
 // Runner consumes jobs from the queue and processes them.
 type Runner struct {
-	logger *slog.Logger
-	queue  *queue.Queue
-	mu     sync.RWMutex
-	ctx    context.Context
-	cancel context.CancelFunc
-	wg     sync.WaitGroup
+	logger  *slog.Logger
+	queue   *queue.Queue
+	jobsSvc *jobs.Service
+	mu      sync.RWMutex
+	ctx     context.Context
+	cancel  context.CancelFunc
+	wg      sync.WaitGroup
 }
 
 // New creates a new job runner. Queue must be set before Start.
@@ -32,6 +35,13 @@ func (r *Runner) SetQueue(q *queue.Queue) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.queue = q
+}
+
+// SetJobsService sets the jobs service for job state management.
+func (r *Runner) SetJobsService(svc *jobs.Service) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.jobsSvc = svc
 }
 
 // Start begins the runner worker goroutine that consumes jobs from the queue.
@@ -80,13 +90,59 @@ func (r *Runner) run() {
 	}
 }
 
-// ProcessJob processes a single job. This is a placeholder implementation.
+// ProcessJob processes a single job with precheck.
+// It performs pre-run checks for source_sync jobs to ensure:
+// 1. The source is enabled
+// 2. At least one enabled device is subscribed to the source
+//
+// If precheck fails, the job is completed with an informational message
+// and no actual work is performed.
 func (r *Runner) ProcessJob(ctx context.Context, jobID string) error {
 	r.logger.Info("processing job", "job_id", jobID)
-	// Placeholder: load job from DB, resolve source, fetch, download, materialize.
-	// Simulate work so skeleton shows real timing.
+
+	if r.jobsSvc == nil {
+		return fmt.Errorf("jobs service not set")
+	}
+
+	// Parse job ID
+	jobUUID, err := dbtypes.NewUUIDFromString(jobID)
+	if err != nil {
+		return fmt.Errorf("invalid job ID: %w", err)
+	}
+
+	// Perform precheck and start job
+	job, canProceed, err := r.jobsSvc.PrecheckAndStartJob(ctx, jobUUID)
+	if err != nil {
+		return fmt.Errorf("precheck/start job: %w", err)
+	}
+
+	if !canProceed {
+		r.logger.Info("job precheck failed, skipped",
+			"job_id", jobID,
+			"source_id", job.SourceID,
+			"message", job.Message)
+		return nil
+	}
+
+	r.logger.Info("job precheck passed, proceeding with work",
+		"job_id", jobID,
+		"source_id", job.SourceID)
+
+	// TODO: Actual job work - fetch, download, materialize
+	// Placeholder: simulate work
 	time.Sleep(100 * time.Millisecond)
-	r.logger.Debug("job processed", "job_id", jobID)
+
+	// Complete the job
+	msg := "Job completed successfully"
+	_, err = r.jobsSvc.CompleteJob(ctx, jobs.CompleteJobRequest{
+		ID:      jobUUID,
+		Message: &msg,
+	})
+	if err != nil {
+		return fmt.Errorf("complete job: %w", err)
+	}
+
+	r.logger.Info("job completed", "job_id", jobID)
 	return nil
 }
 
