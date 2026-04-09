@@ -8,6 +8,7 @@ import (
 	configsroutes "github.com/walens/walens/internal/routes/configs"
 	devsubroutes "github.com/walens/walens/internal/routes/device_subscriptions"
 	devicesroutes "github.com/walens/walens/internal/routes/devices"
+	imagesroutes "github.com/walens/walens/internal/routes/images"
 	schedulesroutes "github.com/walens/walens/internal/routes/source_schedules"
 	sourcetypesroutes "github.com/walens/walens/internal/routes/source_types"
 	sourceroutes "github.com/walens/walens/internal/routes/sources"
@@ -15,6 +16,7 @@ import (
 	configssvc "github.com/walens/walens/internal/services/configs"
 	devsubsvc "github.com/walens/walens/internal/services/device_subscriptions"
 	devicessvc "github.com/walens/walens/internal/services/devices"
+	imagessvc "github.com/walens/walens/internal/services/images"
 	schedulessvc "github.com/walens/walens/internal/services/source_schedules"
 	sourcetypessvc "github.com/walens/walens/internal/services/source_types"
 	sourcessvc "github.com/walens/walens/internal/services/sources"
@@ -159,5 +161,23 @@ func RegisterDeviceSubscriptionsRoutes(api huma.API, basePath string, db *sql.DB
 
 	huma.Register(api, devsubroutes.DeleteDeviceSubscriptionOperation(basePath), func(ctx context.Context, input *devsubroutes.DeleteDeviceSubscriptionInput) (*struct{}, error) {
 		return devsubroutes.DeleteDeviceSubscription(ctx, input, subService)
+	})
+}
+
+// RegisterImagesRoutes registers all images RPC routes under /api/v1/images/.
+func RegisterImagesRoutes(api huma.API, basePath string, db *sql.DB) {
+	var imagesService *imagessvc.Service
+	if db != nil {
+		imagesService = imagessvc.NewService(db)
+	} else {
+		imagesService = imagessvc.NewService(nil)
+	}
+
+	huma.Register(api, imagesroutes.ListImagesOperation(basePath), func(ctx context.Context, input *imagesroutes.ListImagesInput) (*imagesroutes.ListImagesOutput, error) {
+		return imagesroutes.ListImages(ctx, input, imagesService)
+	})
+
+	huma.Register(api, imagesroutes.ListDeviceImagesOperation(basePath), func(ctx context.Context, input *imagesroutes.ListDeviceImagesInput) (*imagesroutes.ListDeviceImagesOutput, error) {
+		return imagesroutes.ListDeviceImages(ctx, input, imagesService)
 	})
 }
