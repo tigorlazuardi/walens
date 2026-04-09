@@ -312,12 +312,13 @@ func TestSortList_BuildOrderByClause_EmptyFieldName(t *testing.T) {
 
 	clauses, err := list.BuildOrderByClause(columns)
 
-	if err == nil {
-		t.Error("expected error for empty field name, got nil")
+	// Empty field names are silently skipped (no error, no clause)
+	if err != nil {
+		t.Errorf("expected no error for empty field name (silently skipped), got: %v", err)
 	}
 
 	if len(clauses) != 0 {
-		t.Errorf("expected 0 clauses, got %d", len(clauses))
+		t.Errorf("expected 0 clauses (empty field skipped), got %d", len(clauses))
 	}
 }
 
