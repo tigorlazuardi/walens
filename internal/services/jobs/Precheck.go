@@ -34,9 +34,9 @@ func (s *Service) CheckSourceAndSubscriptions(ctx context.Context, sourceID dbty
 
 	// Check if source is enabled
 	var source struct {
-		IsEnabled int64 `alias:"is_enabled"`
+		IsEnabled dbtypes.BoolInt `alias:"is_enabled"`
 	}
-	stmt := SELECT(Sources.IsEnabled).
+	stmt := SELECT(Sources.IsEnabled.AS("is_enabled")).
 		FROM(Sources).
 		WHERE(Sources.ID.EQ(String(sourceID.UUID.String()))).
 		LIMIT(1)
@@ -45,7 +45,7 @@ func (s *Service) CheckSourceAndSubscriptions(ctx context.Context, sourceID dbty
 		return nil, fmt.Errorf("check source enabled: %w", err)
 	}
 
-	result.SourceEnabled = source.IsEnabled == 1
+	result.SourceEnabled = bool(source.IsEnabled)
 	if !result.SourceEnabled {
 		result.Message = "Source is disabled; job skipped"
 		return result, nil
@@ -107,7 +107,8 @@ func (s *Service) PrecheckAndStartJob(ctx context.Context, jobID dbtypes.UUID) (
 		return nil, false, fmt.Errorf("precheck failed: %w", err)
 	}
 
-	if !precheck.CanProceed {
+	// Rule 1: If source is disabled, complete job with message and exit
+	if !precheck.SourceEnabled {
 		// Start the job
 		started, err := s.StartJob(ctx, StartJobRequest{ID: jobID})
 		if err != nil {
@@ -115,9 +116,10 @@ func (s *Service) PrecheckAndStartJob(ctx context.Context, jobID dbtypes.UUID) (
 		}
 
 		// Complete immediately with informational message
+		msg := "Source is disabled; job skipped"
 		completed, err := s.CompleteJob(ctx, CompleteJobRequest{
 			ID:      jobID,
-			Message: &precheck.Message,
+			Message: &msg,
 		})
 		if err != nil {
 			return &started, false, fmt.Errorf("complete skipped job: %w", err)
@@ -125,7 +127,27 @@ func (s *Service) PrecheckAndStartJob(ctx context.Context, jobID dbtypes.UUID) (
 		return &completed, false, nil
 	}
 
-	// Precheck passed, start the job normally
+	// Rule 3: Source is enabled but no subscribed devices
+	if !precheck.HasEnabledDevices {
+		// Start the job
+		started, err := s.StartJob(ctx, StartJobRequest{ID: jobID})
+		if err != nil {
+			return nil, false, fmt.Errorf("start job: %w", err)
+		}
+
+		// Complete immediately with informational message
+		msg := "No enabled devices subscribed to source; job skipped"
+		completed, err := s.CompleteJob(ctx, CompleteJobRequest{
+			ID:      jobID,
+			Message: &msg,
+		})
+		if err != nil {
+			return &started, false, fmt.Errorf("complete skipped job: %w", err)
+		}
+		return &completed, false, nil
+	}
+
+	// Rule 4: Source is enabled and has devices, start the job normally
 	started, err := s.StartJob(ctx, StartJobRequest{ID: jobID})
 	if err != nil {
 		return nil, false, fmt.Errorf("start job: %w", err)
