@@ -32,12 +32,13 @@ type ListImagesRequest struct {
 type ListImagesResponse struct {
 	Items      []model.Images                    `json:"items" doc:"List of images"`
 	Pagination *dbtypes.CursorPaginationResponse `json:"pagination"`
+	Total      int64                             `json:"total" doc:"Total count of images matching filters, independent of pagination"`
 }
 
 // ListImages returns all images matching the provided filters.
 func (s *Service) ListImages(ctx context.Context, req ListImagesRequest) (ListImagesResponse, error) {
 	var items []model.Images
-	cond := Bool(true)
+	baseCond := Bool(true)
 
 	// Adult filter
 	if req.Adult != nil {
@@ -45,7 +46,7 @@ func (s *Service) ListImages(ctx context.Context, req ListImagesRequest) (ListIm
 		if *req.Adult {
 			adultVal = int64(1)
 		}
-		cond = cond.AND(Images.IsAdult.EQ(Int64(adultVal)))
+		baseCond = baseCond.AND(Images.IsAdult.EQ(Int64(adultVal)))
 	}
 
 	// Favorite filter
@@ -54,31 +55,31 @@ func (s *Service) ListImages(ctx context.Context, req ListImagesRequest) (ListIm
 		if *req.Favorite {
 			favVal = int64(1)
 		}
-		cond = cond.AND(Images.IsFavorite.EQ(Int64(favVal)))
+		baseCond = baseCond.AND(Images.IsFavorite.EQ(Int64(favVal)))
 	}
 
 	// Width range filter
 	if req.MinWidth != nil {
-		cond = cond.AND(Images.Width.GT_EQ(Int64(*req.MinWidth)))
+		baseCond = baseCond.AND(Images.Width.GT_EQ(Int64(*req.MinWidth)))
 	}
 	if req.MaxWidth != nil && *req.MaxWidth > 0 {
-		cond = cond.AND(Images.Width.LT_EQ(Int64(*req.MaxWidth)))
+		baseCond = baseCond.AND(Images.Width.LT_EQ(Int64(*req.MaxWidth)))
 	}
 
 	// Height range filter
 	if req.MinHeight != nil {
-		cond = cond.AND(Images.Height.GT_EQ(Int64(*req.MinHeight)))
+		baseCond = baseCond.AND(Images.Height.GT_EQ(Int64(*req.MinHeight)))
 	}
 	if req.MaxHeight != nil && *req.MaxHeight > 0 {
-		cond = cond.AND(Images.Height.LT_EQ(Int64(*req.MaxHeight)))
+		baseCond = baseCond.AND(Images.Height.LT_EQ(Int64(*req.MaxHeight)))
 	}
 
 	// File size range filter
 	if req.MinFileSizeBytes != nil {
-		cond = cond.AND(Images.FileSizeBytes.GT_EQ(Int64(*req.MinFileSizeBytes)))
+		baseCond = baseCond.AND(Images.FileSizeBytes.GT_EQ(Int64(*req.MinFileSizeBytes)))
 	}
 	if req.MaxFileSizeBytes != nil && *req.MaxFileSizeBytes > 0 {
-		cond = cond.AND(Images.FileSizeBytes.LT_EQ(Int64(*req.MaxFileSizeBytes)))
+		baseCond = baseCond.AND(Images.FileSizeBytes.LT_EQ(Int64(*req.MaxFileSizeBytes)))
 	}
 
 	// Source IDs filter
@@ -87,7 +88,7 @@ func (s *Service) ListImages(ctx context.Context, req ListImagesRequest) (ListIm
 		for i := 1; i < len(req.SourceIDs); i++ {
 			sourceIDCond = sourceIDCond.OR(Images.SourceID.EQ(String(req.SourceIDs[i].UUID.String())))
 		}
-		cond = cond.AND(sourceIDCond)
+		baseCond = baseCond.AND(sourceIDCond)
 	}
 
 	// Search filter - matches uploader, artist, origin URL, source item identifier, or tags
@@ -113,11 +114,18 @@ func (s *Service) ListImages(ctx context.Context, req ListImagesRequest) (ListIm
 				OR(Images.SourceItemIdentifier.LIKE(pattern)).
 				OR(Images.ID.IN(tagLikeSubquery))
 
-			cond = cond.AND(searchCond)
+			baseCond = baseCond.AND(searchCond)
 		}
 	}
 
-	// Pagination
+	// Get total count before pagination filters
+	total, err := s.countImages(ctx, baseCond)
+	if err != nil {
+		return ListImagesResponse{}, err
+	}
+
+	// Pagination - build condition with cursor filters
+	cond := baseCond
 	next := req.Pagination.NextToken()
 	prev := req.Pagination.PrevToken()
 	isPrev := next == "" && prev != ""
@@ -155,7 +163,7 @@ func (s *Service) ListImages(ctx context.Context, req ListImagesRequest) (ListIm
 		return ListImagesResponse{}, huma.Error500InternalServerError("failed to list images", err)
 	}
 	if len(items) == 0 {
-		return ListImagesResponse{Items: []model.Images{}}, nil
+		return ListImagesResponse{Items: []model.Images{}, Total: total}, nil
 	}
 
 	hasMore := len(items) > int(limit)
@@ -173,5 +181,5 @@ func (s *Service) ListImages(ctx context.Context, req ListImagesRequest) (ListIm
 		cursor.Prev = items[0].ID
 	}
 
-	return ListImagesResponse{Items: items, Pagination: cursor}, nil
+	return ListImagesResponse{Items: items, Pagination: cursor, Total: total}, nil
 }

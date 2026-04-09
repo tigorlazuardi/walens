@@ -34,6 +34,7 @@ type ListDeviceImagesRequest struct {
 type ListDeviceImagesResponse struct {
 	Items      []model.Images                    `json:"items" doc:"List of images"`
 	Pagination *dbtypes.CursorPaginationResponse `json:"pagination"`
+	Total      int64                             `json:"total" doc:"Total count of images matching filters, independent of pagination"`
 }
 
 // ListDeviceImages returns images that match a specific device according to
@@ -56,7 +57,7 @@ func (s *Service) ListDeviceImages(ctx context.Context, req ListDeviceImagesRequ
 	// Build the base condition:
 	// - Image must come from a source the device subscribes to (enabled subscription)
 	//   OR have an existing assignment/location for this device (historical, no enabled check)
-	cond := Bool(true)
+	baseCond := Bool(true)
 
 	// Historical branch: image has assignment or location for this device
 	// These don't depend on enabled flags - images should still appear even if
@@ -138,7 +139,7 @@ func (s *Service) ListDeviceImages(ctx context.Context, req ListDeviceImagesRequ
 	}
 
 	// Combine historical and current eligibility conditions
-	cond = cond.AND(historicalAssignExists.OR(historicalLocationExists).OR(currentEligibilityExists))
+	baseCond = baseCond.AND(historicalAssignExists.OR(historicalLocationExists).OR(currentEligibilityExists))
 
 	// Apply optional request-level filters on top
 
@@ -148,7 +149,7 @@ func (s *Service) ListDeviceImages(ctx context.Context, req ListDeviceImagesRequ
 		if *req.Adult {
 			adultVal = int64(1)
 		}
-		cond = cond.AND(Images.IsAdult.EQ(Int64(adultVal)))
+		baseCond = baseCond.AND(Images.IsAdult.EQ(Int64(adultVal)))
 	}
 
 	// Favorite filter
@@ -157,7 +158,7 @@ func (s *Service) ListDeviceImages(ctx context.Context, req ListDeviceImagesRequ
 		if *req.Favorite {
 			favVal = int64(1)
 		}
-		cond = cond.AND(Images.IsFavorite.EQ(Int64(favVal)))
+		baseCond = baseCond.AND(Images.IsFavorite.EQ(Int64(favVal)))
 	}
 
 	// Width range filter (request-level overrides device-level if stricter)
@@ -167,7 +168,7 @@ func (s *Service) ListDeviceImages(ctx context.Context, req ListDeviceImagesRequ
 		if device.MinImageWidth > 0 && device.MinImageWidth > minW {
 			minW = device.MinImageWidth
 		}
-		cond = cond.AND(Images.Width.GT_EQ(Int(minW)))
+		baseCond = baseCond.AND(Images.Width.GT_EQ(Int(minW)))
 	}
 	if req.MaxWidth != nil && *req.MaxWidth > 0 {
 		// Take the min of device constraint and request constraint
@@ -175,7 +176,7 @@ func (s *Service) ListDeviceImages(ctx context.Context, req ListDeviceImagesRequ
 		if device.MaxImageWidth > 0 && device.MaxImageWidth < maxW {
 			maxW = device.MaxImageWidth
 		}
-		cond = cond.AND(Images.Width.LT_EQ(Int(maxW)))
+		baseCond = baseCond.AND(Images.Width.LT_EQ(Int(maxW)))
 	}
 
 	// Height range filter
@@ -184,14 +185,14 @@ func (s *Service) ListDeviceImages(ctx context.Context, req ListDeviceImagesRequ
 		if device.MinImageHeight > 0 && device.MinImageHeight > minH {
 			minH = device.MinImageHeight
 		}
-		cond = cond.AND(Images.Height.GT_EQ(Int(minH)))
+		baseCond = baseCond.AND(Images.Height.GT_EQ(Int(minH)))
 	}
 	if req.MaxHeight != nil && *req.MaxHeight > 0 {
 		maxH := *req.MaxHeight
 		if device.MaxImageHeight > 0 && device.MaxImageHeight < maxH {
 			maxH = device.MaxImageHeight
 		}
-		cond = cond.AND(Images.Height.LT_EQ(Int(maxH)))
+		baseCond = baseCond.AND(Images.Height.LT_EQ(Int(maxH)))
 	}
 
 	// File size range filter
@@ -200,14 +201,14 @@ func (s *Service) ListDeviceImages(ctx context.Context, req ListDeviceImagesRequ
 		if device.MinFilesize > 0 && device.MinFilesize > minF {
 			minF = device.MinFilesize
 		}
-		cond = cond.AND(Images.FileSizeBytes.GT_EQ(Int(minF)))
+		baseCond = baseCond.AND(Images.FileSizeBytes.GT_EQ(Int(minF)))
 	}
 	if req.MaxFileSizeBytes != nil && *req.MaxFileSizeBytes > 0 {
 		maxF := *req.MaxFileSizeBytes
 		if device.MaxFilesize > 0 && device.MaxFilesize < maxF {
 			maxF = device.MaxFilesize
 		}
-		cond = cond.AND(Images.FileSizeBytes.LT_EQ(Int(maxF)))
+		baseCond = baseCond.AND(Images.FileSizeBytes.LT_EQ(Int(maxF)))
 	}
 
 	// Search filter - matches uploader, artist, origin URL, source item identifier, or tags
@@ -233,11 +234,18 @@ func (s *Service) ListDeviceImages(ctx context.Context, req ListDeviceImagesRequ
 				OR(Images.SourceItemIdentifier.LIKE(pattern)).
 				OR(Images.ID.IN(tagLikeSubquery))
 
-			cond = cond.AND(searchCond)
+			baseCond = baseCond.AND(searchCond)
 		}
 	}
 
-	// Pagination
+	// Get total count before pagination filters
+	total, err := s.countImages(ctx, baseCond)
+	if err != nil {
+		return ListDeviceImagesResponse{}, err
+	}
+
+	// Pagination - build condition with cursor filters
+	cond := baseCond
 	next := req.Pagination.NextToken()
 	prev := req.Pagination.PrevToken()
 	isPrev := next == "" && prev != ""
@@ -278,7 +286,7 @@ func (s *Service) ListDeviceImages(ctx context.Context, req ListDeviceImagesRequ
 		return ListDeviceImagesResponse{}, huma.Error500InternalServerError("failed to list device images", err)
 	}
 	if len(items) == 0 {
-		return ListDeviceImagesResponse{Items: []model.Images{}}, nil
+		return ListDeviceImagesResponse{Items: []model.Images{}, Total: total}, nil
 	}
 
 	hasMore := len(items) > int(limit)
@@ -296,5 +304,5 @@ func (s *Service) ListDeviceImages(ctx context.Context, req ListDeviceImagesRequ
 		cursor.Prev = items[0].ID
 	}
 
-	return ListDeviceImagesResponse{Items: items, Pagination: cursor}, nil
+	return ListDeviceImagesResponse{Items: items, Pagination: cursor, Total: total}, nil
 }

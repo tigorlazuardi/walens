@@ -900,3 +900,195 @@ func TestListDeviceImages_DisabledSubscriptionWithHistoricalImageSearch(t *testi
 		t.Errorf("expected 0 images for non-matching search, got %d", len(resp.Items))
 	}
 }
+
+// TestListImages_TotalCount verifies that Total reflects all matching rows independent of pagination.
+func TestListImages_TotalCount(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+
+	svc := NewService(db)
+	ctx := context.Background()
+
+	// Create source and multiple images
+	sourceID := dbtypes.MustNewUUIDV7()
+	insertSource(t, db, sourceID.UUID.String(), "Test Source", "booru", true)
+
+	// Create 5 images with uploader "artist_total_test"
+	for i := 0; i < 5; i++ {
+		imgID := dbtypes.MustNewUUIDV7()
+		insertImageWithMetadata(t, db, imgID.UUID.String(), sourceID.UUID.String(), "unique-"+string(rune('a'+i)), "artist_total_test", "", "", "", 1920, 1080, 100000, false)
+	}
+
+	// Create 3 more images with different uploader
+	for i := 0; i < 3; i++ {
+		imgID := dbtypes.MustNewUUIDV7()
+		insertImageWithMetadata(t, db, imgID.UUID.String(), sourceID.UUID.String(), "other-"+string(rune('a'+i)), "other_artist", "", "", "", 1920, 1080, 100000, false)
+	}
+
+	// Test: Total should be 5 for search matching "artist_total_test"
+	search := "artist_total_test"
+	req := ListImagesRequest{
+		Search:     &search,
+		Pagination: &dbtypes.CursorPaginationRequest{},
+	}
+	resp, err := svc.ListImages(ctx, req)
+	if err != nil {
+		t.Fatalf("ListImages with search failed: %v", err)
+	}
+	if resp.Total != 5 {
+		t.Errorf("expected Total=5 for search 'artist_total_test', got %d", resp.Total)
+	}
+
+	// Test: Total should be 8 when no search filter (all images)
+	req = ListImagesRequest{
+		Pagination: &dbtypes.CursorPaginationRequest{},
+	}
+	resp, err = svc.ListImages(ctx, req)
+	if err != nil {
+		t.Fatalf("ListImages without search failed: %v", err)
+	}
+	if resp.Total != 8 {
+		t.Errorf("expected Total=8 for all images, got %d", resp.Total)
+	}
+}
+
+// TestListImages_TotalNotAffectedByPagination verifies Total is independent of Limit.
+func TestListImages_TotalNotAffectedByPagination(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+
+	svc := NewService(db)
+	ctx := context.Background()
+
+	// Create source and multiple images
+	sourceID := dbtypes.MustNewUUIDV7()
+	insertSource(t, db, sourceID.UUID.String(), "Test Source", "booru", true)
+
+	// Create 10 images
+	for i := 0; i < 10; i++ {
+		imgID := dbtypes.MustNewUUIDV7()
+		insertImageWithMetadata(t, db, imgID.UUID.String(), sourceID.UUID.String(), "paged-"+string(rune('a'+i)), "pagination_artist", "", "", "", 1920, 1080, 100000, false)
+	}
+
+	// First page with small limit
+	limit := 3
+	req := ListImagesRequest{
+		Pagination: &dbtypes.CursorPaginationRequest{
+			Limit: &limit,
+		},
+	}
+	resp, err := svc.ListImages(ctx, req)
+	if err != nil {
+		t.Fatalf("ListImages with limit failed: %v", err)
+	}
+
+	// Items should be limited to 3
+	if len(resp.Items) > 3 {
+		t.Errorf("expected at most 3 items, got %d", len(resp.Items))
+	}
+	// But Total should still be 10
+	if resp.Total != 10 {
+		t.Errorf("expected Total=10 (independent of pagination), got %d", resp.Total)
+	}
+}
+
+// TestListDeviceImages_TotalCount verifies Total for device images.
+func TestListDeviceImages_TotalCount(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+
+	svc := NewService(db)
+	ctx := context.Background()
+
+	// Create an enabled device
+	deviceID := dbtypes.MustNewUUIDV7()
+	insertDevice(t, db, deviceID.UUID.String(), "Test Device", "test-device", 1920, 1080, true, false)
+
+	// Create a source and subscription
+	sourceID := dbtypes.MustNewUUIDV7()
+	insertSource(t, db, sourceID.UUID.String(), "Test Source", "booru", true)
+
+	subscriptionID := dbtypes.MustNewUUIDV7()
+	insertDeviceSubscription(t, db, subscriptionID.UUID.String(), deviceID.UUID.String(), sourceID.UUID.String(), true)
+
+	// Create 4 images matching device constraints
+	for i := 0; i < 4; i++ {
+		imgID := dbtypes.MustNewUUIDV7()
+		insertImageWithMetadata(t, db, imgID.UUID.String(), sourceID.UUID.String(), "match-"+string(rune('a'+i)), "matching_artist", "", "", "", 1920, 1080, 100000, false)
+	}
+
+	// Create 2 more images with different artist (non-matching search)
+	for i := 0; i < 2; i++ {
+		imgID := dbtypes.MustNewUUIDV7()
+		insertImageWithMetadata(t, db, imgID.UUID.String(), sourceID.UUID.String(), "other-"+string(rune('a'+i)), "other_artist", "", "", "", 1920, 1080, 100000, false)
+	}
+
+	// Test: Total should be 6 for this device (4 matching + 2 other, all meet device constraints)
+	req := ListDeviceImagesRequest{
+		DeviceID:   deviceID,
+		Pagination: &dbtypes.CursorPaginationRequest{},
+	}
+	resp, err := svc.ListDeviceImages(ctx, req)
+	if err != nil {
+		t.Fatalf("ListDeviceImages failed: %v", err)
+	}
+	if resp.Total != 6 {
+		t.Errorf("expected Total=6 for device images, got %d", resp.Total)
+	}
+
+	// Test: Total should be 2 when searching for "other_artist"
+	searchOther := "other_artist"
+	req = ListDeviceImagesRequest{
+		DeviceID:   deviceID,
+		Search:     &searchOther,
+		Pagination: &dbtypes.CursorPaginationRequest{},
+	}
+	resp, err = svc.ListDeviceImages(ctx, req)
+	if err != nil {
+		t.Fatalf("ListDeviceImages with search failed: %v", err)
+	}
+	if resp.Total != 2 {
+		t.Errorf("expected Total=2 for search 'other_artist', got %d", resp.Total)
+	}
+}
+
+// TestListDeviceImages_TotalForHistoricalImages verifies Total includes historical images.
+func TestListDeviceImages_TotalForHistoricalImages(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+
+	svc := NewService(db)
+	ctx := context.Background()
+
+	// Create a disabled device (no current eligibility)
+	deviceID := dbtypes.MustNewUUIDV7()
+	insertDevice(t, db, deviceID.UUID.String(), "Disabled Device", "disabled-hist", 1920, 1080, false, false)
+
+	// Create a source (subscription exists but device is disabled)
+	sourceID := dbtypes.MustNewUUIDV7()
+	insertSource(t, db, sourceID.UUID.String(), "Test Source", "booru", true)
+
+	subscriptionID := dbtypes.MustNewUUIDV7()
+	insertDeviceSubscription(t, db, subscriptionID.UUID.String(), deviceID.UUID.String(), sourceID.UUID.String(), true)
+
+	// Create 3 images with assignments to the disabled device
+	for i := 0; i < 3; i++ {
+		imgID := dbtypes.MustNewUUIDV7()
+		insertImage(t, db, imgID.UUID.String(), sourceID.UUID.String(), "hist-img-"+string(rune('a'+i)), 1920, 1080, 100000, false)
+		assignmentID := dbtypes.MustNewUUIDV7()
+		insertImageAssignment(t, db, assignmentID.UUID.String(), imgID.UUID.String(), deviceID.UUID.String())
+	}
+
+	// Query images - should return 3 historical images
+	req := ListDeviceImagesRequest{
+		DeviceID:   deviceID,
+		Pagination: &dbtypes.CursorPaginationRequest{},
+	}
+	resp, err := svc.ListDeviceImages(ctx, req)
+	if err != nil {
+		t.Fatalf("ListDeviceImages failed: %v", err)
+	}
+	if resp.Total != 3 {
+		t.Errorf("expected Total=3 for historical images, got %d", resp.Total)
+	}
+}
