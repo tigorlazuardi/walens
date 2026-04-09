@@ -12,13 +12,13 @@ import (
 )
 
 type ListDevicesRequest struct {
-	Search     *string                          `json:"search" doc:"search devices by name or slug"`
-	Pagination *dbtypes.CursorPaginationRequest `json:"pagination" doc:"pagination request"`
+	Search     *string                          `json:"search" doc:"Search devices by name or slug"`
+	Pagination *dbtypes.CursorPaginationRequest `json:"pagination"`
 }
 
 type ListDevicesResponse struct {
-	Items      []model.Devices `json:"items" doc:"List of devices."`
-	Pagination dbtypes.CursorPaginationResponse
+	Items      []model.Devices                   `json:"items" doc:"List of devices"`
+	Pagination *dbtypes.CursorPaginationResponse `json:"pagination"`
 }
 
 func (s *Service) ListDevices(ctx context.Context, req ListDevicesRequest) (ListDevicesResponse, error) {
@@ -41,29 +41,45 @@ func (s *Service) ListDevices(ctx context.Context, req ListDevicesRequest) (List
 	if isPrev {
 		cond = cond.AND(Devices.ID.GT(String(prev)))
 	}
-	orderBy := []OrderByClause{Devices.Name.ASC()}
+	orderBy, err := req.Pagination.BuildOrderByClause(Devices.AllColumns)
+	if err != nil {
+		return ListDevicesResponse{}, err
+	}
+	if len(orderBy) == 0 {
+		orderBy = append(orderBy, Devices.Name.ASC())
+	}
 	if isPrev {
 		orderBy = append(orderBy, Devices.ID.DESC())
 	} else {
 		orderBy = append(orderBy, Devices.ID.ASC())
 	}
+	limit := req.Pagination.GetLimitOrDefault(20, 100)
 	stmt := SELECT(Devices.AllColumns).
 		FROM(Devices).
 		WHERE(cond).
 		ORDER_BY(orderBy...).
-		LIMIT(req.Pagination.GetLimitOrDefault(20, 100)).
+		LIMIT(limit + 1).
 		OFFSET(req.Pagination.GetOffset())
 
 	if err := stmt.QueryContext(ctx, s.db, &items); err != nil {
 		return ListDevicesResponse{}, huma.Error500InternalServerError("failed to list devices", err)
 	}
-	if items == nil {
+	if len(items) == 0 {
 		return ListDevicesResponse{Items: []model.Devices{}}, nil
 	}
+	hasMore := len(items) > int(limit)
+	items = items[:limit]
+	cursor := &dbtypes.CursorPaginationResponse{}
 	if isPrev {
 		slices.Reverse(items)
 	}
-	return ListDevicesResponse{Items: items}, nil
+	if hasMore {
+		cursor.Next = items[len(items)-1].ID
+	}
+	if next != "" {
+		cursor.Prev = items[0].ID
+	}
+	return ListDevicesResponse{Items: items, Pagination: cursor}, nil
 }
 
 func ptrStr(s *string) string {
