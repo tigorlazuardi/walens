@@ -13,6 +13,7 @@ import (
 	"github.com/walens/walens/internal/queue"
 	"github.com/walens/walens/internal/services/images"
 	"github.com/walens/walens/internal/services/jobs"
+	"github.com/walens/walens/internal/services/tags"
 	"github.com/walens/walens/internal/sources"
 	"github.com/walens/walens/internal/storage"
 )
@@ -24,6 +25,7 @@ type Runner struct {
 	jobsSvc        *jobs.Service
 	storageSvc     *storage.Service
 	imageSvc       *images.Service
+	tagsSvc        *tags.Service
 	sourceRegistry *sources.Registry
 	materializer   *Materializer
 	mu             sync.RWMutex
@@ -76,6 +78,16 @@ func (r *Runner) SetImageService(svc *images.Service) {
 	}
 }
 
+// SetTagsService sets the tags service for tag operations.
+func (r *Runner) SetTagsService(svc *tags.Service) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.tagsSvc = svc
+	if r.materializer != nil {
+		r.materializer.SetTagsService(svc)
+	}
+}
+
 // SetSourceRegistry sets the source registry for source lookups.
 func (r *Runner) SetSourceRegistry(reg *sources.Registry) {
 	r.mu.Lock()
@@ -98,6 +110,9 @@ func (r *Runner) getMaterializer() *Materializer {
 		}
 		if r.jobsSvc != nil {
 			r.materializer.SetJobsService(r.jobsSvc)
+		}
+		if r.tagsSvc != nil {
+			r.materializer.SetTagsService(r.tagsSvc)
 		}
 	}
 	return r.materializer

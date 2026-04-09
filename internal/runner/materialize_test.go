@@ -14,6 +14,7 @@ import (
 	"github.com/walens/walens/internal/db/generated/model"
 	"github.com/walens/walens/internal/dbtypes"
 	"github.com/walens/walens/internal/services/images"
+	"github.com/walens/walens/internal/services/tags"
 	"github.com/walens/walens/internal/sources"
 	"github.com/walens/walens/internal/storage"
 	"iter"
@@ -134,6 +135,19 @@ func createTables(t *testing.T, db *sql.DB) {
 			json_result TEXT NOT NULL DEFAULT '{}',
 			created_at INTEGER NOT NULL,
 			updated_at INTEGER NOT NULL
+		)`,
+		`CREATE TABLE tags (
+			id TEXT PRIMARY KEY,
+			name TEXT NOT NULL,
+			normalized_name TEXT NOT NULL UNIQUE,
+			created_at INTEGER NOT NULL,
+			updated_at INTEGER NOT NULL
+		)`,
+		`CREATE TABLE image_tags (
+			id TEXT PRIMARY KEY,
+			image_id TEXT NOT NULL,
+			tag_id TEXT NOT NULL,
+			created_at INTEGER NOT NULL
 		)`,
 	}
 
@@ -945,5 +959,158 @@ func TestStoredCount_OnlyNewImages(t *testing.T) {
 	}
 	if count != 1 {
 		t.Errorf("expected 1 image created, got %d", count)
+	}
+}
+
+// TestTagsPersistence_TagsAreStored tests that tags from ImageMetadata are persisted.
+func TestTagsPersistence_TagsAreStored(t *testing.T) {
+	db := openTestDB(t)
+	defer db.Close()
+	createTables(t, db)
+
+	ts := newTestStorage(t)
+	defer ts.cleanup()
+
+	ctx := context.Background()
+
+	deviceID := dbtypes.MustNewUUIDV7()
+	sourceID := dbtypes.MustNewUUIDV7()
+
+	insertTestDevice(t, db, deviceID.UUID.String(), "Test Device", "test-device")
+	insertTestSource(t, db, sourceID.UUID.String(), "test-source")
+
+	// Setup materializer with services
+	mat := NewMaterializer(slog.New(slog.DiscardHandler))
+	mat.SetStorageService(ts.Service)
+	mat.SetImageService(images.NewService(db))
+	mat.SetTagsService(tags.NewService(db))
+
+	// Create source that yields an image with tags
+	src := &mockSource{
+		items: []sources.ImageMetadata{
+			{
+				UniqueIdentifier: "tagged-img",
+				OriginURL:        "http://example.com/tagged.jpg",
+				MimeType:         "image/jpeg",
+				Tags:             []string{"landscape", "nature", "Mountain"},
+			},
+		},
+	}
+
+	req := MaterializeRequest{
+		SourceID:    sourceID,
+		SourceType:  "mock",
+		LookupCount: 10,
+		Devices:     []model.Devices{{ID: &deviceID, Slug: "test-device"}},
+	}
+
+	result, err := mat.MaterializeImage(ctx, req, src)
+	if err != nil {
+		t.Fatalf("MaterializeImage failed: %v", err)
+	}
+
+	// Verify image was created
+	var imageID string
+	err = db.QueryRow("SELECT id FROM images WHERE unique_identifier = ?", "tagged-img").Scan(&imageID)
+	if err != nil {
+		t.Fatalf("get image id: %v", err)
+	}
+
+	// Verify tags were created (should be case-insensitively deduped)
+	var tagCount int
+	err = db.QueryRow("SELECT COUNT(*) FROM tags WHERE normalized_name IN (?, ?, ?)",
+		"landscape", "nature", "mountain").Scan(&tagCount)
+	if err != nil {
+		t.Fatalf("count tags: %v", err)
+	}
+	if tagCount != 3 {
+		t.Errorf("expected 3 tags, got %d", tagCount)
+	}
+
+	// Verify image_tags associations were created
+	var imageTagCount int
+	err = db.QueryRow("SELECT COUNT(*) FROM image_tags WHERE image_id = ?", imageID).Scan(&imageTagCount)
+	if err != nil {
+		t.Fatalf("count image_tags: %v", err)
+	}
+	if imageTagCount != 3 {
+		t.Errorf("expected 3 image_tags, got %d", imageTagCount)
+	}
+
+	// Verify result counters - downloads will fail but tags should be synced
+	_ = result
+}
+
+// TestTagsPersistence_DedupeCaseInsensitive tests that duplicate tags are deduped case-insensitively.
+func TestTagsPersistence_DedupeCaseInsensitive(t *testing.T) {
+	db := openTestDB(t)
+	defer db.Close()
+	createTables(t, db)
+
+	ts := newTestStorage(t)
+	defer ts.cleanup()
+
+	ctx := context.Background()
+
+	deviceID := dbtypes.MustNewUUIDV7()
+	sourceID := dbtypes.MustNewUUIDV7()
+
+	insertTestDevice(t, db, deviceID.UUID.String(), "Test Device", "test-device")
+	insertTestSource(t, db, sourceID.UUID.String(), "test-source")
+
+	// Setup materializer with services
+	mat := NewMaterializer(slog.New(slog.DiscardHandler))
+	mat.SetStorageService(ts.Service)
+	mat.SetImageService(images.NewService(db))
+	mat.SetTagsService(tags.NewService(db))
+
+	// Create source that yields an image with duplicate tags (different cases)
+	src := &mockSource{
+		items: []sources.ImageMetadata{
+			{
+				UniqueIdentifier: "dedupe-img",
+				OriginURL:        "http://example.com/dedupe.jpg",
+				MimeType:         "image/jpeg",
+				Tags:             []string{"TAG1", "tag1", "Tag1"},
+			},
+		},
+	}
+
+	req := MaterializeRequest{
+		SourceID:    sourceID,
+		SourceType:  "mock",
+		LookupCount: 10,
+		Devices:     []model.Devices{{ID: &deviceID, Slug: "test-device"}},
+	}
+
+	_, err := mat.MaterializeImage(ctx, req, src)
+	if err != nil {
+		t.Fatalf("MaterializeImage failed: %v", err)
+	}
+
+	// Verify only one tag was created
+	var tagCount int
+	err = db.QueryRow("SELECT COUNT(*) FROM tags WHERE normalized_name = ?", "tag1").Scan(&tagCount)
+	if err != nil {
+		t.Fatalf("count tags: %v", err)
+	}
+	if tagCount != 1 {
+		t.Errorf("expected 1 tag (deduped), got %d", tagCount)
+	}
+
+	// Verify image_id was stored only once for this image
+	var imageID string
+	err = db.QueryRow("SELECT id FROM images WHERE unique_identifier = ?", "dedupe-img").Scan(&imageID)
+	if err != nil {
+		t.Fatalf("get image id: %v", err)
+	}
+
+	var imageTagCount int
+	err = db.QueryRow("SELECT COUNT(*) FROM image_tags WHERE image_id = ?", imageID).Scan(&imageTagCount)
+	if err != nil {
+		t.Fatalf("count image_tags: %v", err)
+	}
+	if imageTagCount != 1 {
+		t.Errorf("expected 1 image_tag (deduped), got %d", imageTagCount)
 	}
 }

@@ -28,6 +28,7 @@ import (
 	"github.com/walens/walens/internal/services/images"
 	"github.com/walens/walens/internal/services/jobs"
 	sourcesvc "github.com/walens/walens/internal/services/sources"
+	"github.com/walens/walens/internal/services/tags"
 	"github.com/walens/walens/internal/sources"
 	"github.com/walens/walens/internal/sources/booru"
 	"github.com/walens/walens/internal/sources/reddit"
@@ -47,6 +48,7 @@ type App struct {
 	sourceRegistry *sources.Registry
 	storageSvc     *storage.Service
 	imageSvc       *images.Service
+	tagsService    *tags.Service
 	server         *http.Server
 	scheduler      *scheduler.Scheduler
 	queue          *queue.Queue
@@ -180,6 +182,7 @@ func (a *App) initDB() error {
 	// Initialize storage and image services with the persisted data directory.
 	a.storageSvc = storage.NewService(storage.Config{BaseDir: persistedCfg.DataDir})
 	a.imageSvc = images.NewService(a.db)
+	a.tagsService = tags.NewService(a.db)
 
 	// Rebuild logger with persisted log level, then rebuild dependent components.
 	a.logger = logger.New(persistedCfg.LogLevel)
@@ -189,6 +192,7 @@ func (a *App) initDB() error {
 	a.runner.SetJobsService(a.jobsService)
 	a.runner.SetStorageService(a.storageSvc)
 	a.runner.SetImageService(a.imageSvc)
+	a.runner.SetTagsService(a.tagsService)
 	a.runner.SetSourceRegistry(a.sourceRegistry)
 	a.scheduler = scheduler.New(a.logger)
 

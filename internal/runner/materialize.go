@@ -16,6 +16,7 @@ import (
 	"github.com/walens/walens/internal/dbtypes"
 	"github.com/walens/walens/internal/services/images"
 	"github.com/walens/walens/internal/services/jobs"
+	"github.com/walens/walens/internal/services/tags"
 	"github.com/walens/walens/internal/sources"
 	"github.com/walens/walens/internal/storage"
 )
@@ -53,6 +54,7 @@ type Materializer struct {
 	storageSvc *storage.Service
 	imageSvc   *images.Service
 	jobsSvc    *jobs.Service
+	tagsSvc    *tags.Service
 }
 
 // NewMaterializer creates a new Materializer.
@@ -75,6 +77,11 @@ func (m *Materializer) SetImageService(svc *images.Service) {
 // SetJobsService sets the jobs service.
 func (m *Materializer) SetJobsService(svc *jobs.Service) {
 	m.jobsSvc = svc
+}
+
+// SetTagsService sets the tags service.
+func (m *Materializer) SetTagsService(svc *tags.Service) {
+	m.tagsSvc = svc
 }
 
 // MaterializeImage processes source image metadata and materializes to eligible devices.
@@ -139,6 +146,14 @@ func (m *Materializer) MaterializeImage(ctx context.Context, req MaterializeRequ
 		if err != nil {
 			m.logger.Warn("failed to get or create image", "error", err, "unique_id", uniqueID)
 			continue
+		}
+
+		// Sync tags for this image - happens before materialization so metadata is persisted
+		// even if a device later gets skipped. Failures are logged but don't stop processing.
+		if m.tagsSvc != nil && len(item.Tags) > 0 {
+			if err := m.tagsSvc.SyncImageTags(ctx, *img.ID, item.Tags, m.logger); err != nil {
+				m.logger.Warn("failed to sync image tags", "error", err, "unique_id", uniqueID)
+			}
 		}
 
 		// Track if this image is newly created - we count new images toward StoredCount once
