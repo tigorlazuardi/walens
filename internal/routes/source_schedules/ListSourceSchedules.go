@@ -27,9 +27,7 @@ type ListSourceSchedulesInput struct {
 
 // ListSourceSchedulesOutput describes the response body for ListSourceSchedules.
 type ListSourceSchedulesOutput struct {
-	Body struct {
-		Items []schedulesvc.ScheduleRow `json:"items" doc:"List of source schedules."`
-	}
+	Body schedulesvc.ListSchedulesResponse
 }
 
 // ListSourceSchedules handles POST /api/v1/source_schedules/ListSourceSchedules.
@@ -41,10 +39,6 @@ func ListSourceSchedules(ctx context.Context, input *ListSourceSchedulesInput, s
 	}
 
 	return &ListSourceSchedulesOutput{
-		Body: struct {
-			Items []schedulesvc.ScheduleRow `json:"items" doc:"List of source schedules."`
-		}{
-			Items: resp.Items,
-		},
+		Body: resp,
 	}, nil
 }

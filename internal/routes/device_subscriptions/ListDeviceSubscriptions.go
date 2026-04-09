@@ -27,9 +27,7 @@ type ListDeviceSubscriptionsInput struct {
 
 // ListDeviceSubscriptionsOutput describes the response body for ListDeviceSubscriptions.
 type ListDeviceSubscriptionsOutput struct {
-	Body struct {
-		Items []subsvc.SubscriptionRow `json:"items" doc:"List of device source subscriptions."`
-	}
+	Body subsvc.ListSubscriptionsResponse
 }
 
 // ListDeviceSubscriptions handles POST /api/v1/device_subscriptions/ListDeviceSubscriptions.
@@ -41,10 +39,6 @@ func ListDeviceSubscriptions(ctx context.Context, input *ListDeviceSubscriptions
 	}
 
 	return &ListDeviceSubscriptionsOutput{
-		Body: struct {
-			Items []subsvc.SubscriptionRow `json:"items" doc:"List of device source subscriptions."`
-		}{
-			Items: resp.Items,
-		},
+		Body: resp,
 	}, nil
 }

@@ -83,18 +83,17 @@ type SetJobResultRequest struct {
 
 // ListJobsRequest contains filters for listing jobs.
 type ListJobsRequest struct {
-	Status      *string       `json:"status,omitempty" doc:"Filter by status."`
-	JobType     *string       `json:"job_type,omitempty" doc:"Filter by job type."`
-	SourceID    *dbtypes.UUID `json:"source_id,omitempty" doc:"Filter by source ID."`
-	TriggerKind *string       `json:"trigger_kind,omitempty" doc:"Filter by trigger kind."`
-	Limit       int           `json:"limit" doc:"Maximum number of jobs to return."`
-	Offset      int           `json:"offset" doc:"Offset for pagination."`
+	Status      *string                          `json:"status,omitempty" doc:"Filter by status."`
+	JobType     *string                          `json:"job_type,omitempty" doc:"Filter by job type."`
+	SourceID    *dbtypes.UUID                    `json:"source_id,omitempty" doc:"Filter by source ID."`
+	TriggerKind *string                          `json:"trigger_kind,omitempty" doc:"Filter by trigger kind."`
+	Pagination  *dbtypes.CursorPaginationRequest `json:"pagination,omitempty"`
 }
 
-// ListJobsResponse contains the list of jobs and total count.
+// ListJobsResponse contains the list of jobs and cursor pagination.
 type ListJobsResponse struct {
-	Items []model.Jobs `json:"items" doc:"List of jobs."`
-	Total int64        `json:"total" doc:"Total number of jobs matching filters."`
+	Items      []model.Jobs                      `json:"items" doc:"List of jobs."`
+	Pagination *dbtypes.CursorPaginationResponse `json:"pagination"`
 }
 
 type GetJobRequest struct {

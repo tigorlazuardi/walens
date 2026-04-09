@@ -27,9 +27,7 @@ type ListDevicesInput struct {
 
 // ListDevicesOutput describes the response body for ListDevices.
 type ListDevicesOutput struct {
-	Body struct {
-		Items []devicesvc.CreateDeviceResponse `json:"items" doc:"List of devices."`
-	}
+	Body devicesvc.ListDevicesResponse
 }
 
 // ListDevices handles POST /api/v1/devices/ListDevices.
@@ -41,10 +39,6 @@ func ListDevices(ctx context.Context, input *ListDevicesInput, svc *devicesvc.Se
 	}
 
 	return &ListDevicesOutput{
-		Body: struct {
-			Items []devicesvc.CreateDeviceResponse `json:"items" doc:"List of devices."`
-		}{
-			Items: resp.Items,
-		},
+		Body: resp,
 	}, nil
 }

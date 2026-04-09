@@ -30,6 +30,8 @@ func assertHumaErrorStatus(t *testing.T, err error, expectedStatus int) {
 	}
 }
 
+func intPtr(v int) *int { return &v }
+
 func openTestDB(t *testing.T) *sql.DB {
 	db, err := sql.Open("sqlite", ":memory:")
 	if err != nil {
@@ -220,16 +222,12 @@ func TestListJobs(t *testing.T) {
 
 	// List all jobs
 	resp, err := svc.ListJobs(ctx, ListJobsRequest{
-		Limit:  10,
-		Offset: 0,
+		Pagination: &dbtypes.CursorPaginationRequest{Limit: intPtr(10), Offset: intPtr(0)},
 	})
 	if err != nil {
 		t.Fatalf("ListJobs failed: %v", err)
 	}
 
-	if resp.Total != 3 {
-		t.Errorf("expected total 3, got %d", resp.Total)
-	}
 	if len(resp.Items) != 3 {
 		t.Errorf("expected 3 items, got %d", len(resp.Items))
 	}
@@ -265,16 +263,15 @@ func TestListJobsWithFilter(t *testing.T) {
 	// List only queued jobs
 	queuedStatus := StatusQueued
 	resp, err := svc.ListJobs(ctx, ListJobsRequest{
-		Status: &queuedStatus,
-		Limit:  10,
-		Offset: 0,
+		Status:     &queuedStatus,
+		Pagination: &dbtypes.CursorPaginationRequest{Limit: intPtr(10), Offset: intPtr(0)},
 	})
 	if err != nil {
 		t.Fatalf("ListJobs failed: %v", err)
 	}
 
-	if resp.Total != 1 {
-		t.Errorf("expected total 1 (queued), got %d", resp.Total)
+	if len(resp.Items) != 1 {
+		t.Errorf("expected 1 queued item, got %d", len(resp.Items))
 	}
 }
 
@@ -538,7 +535,7 @@ func TestRecoverRunningJobs(t *testing.T) {
 
 	// Verify the job is now queued
 	resp, _ := svc.ListJobs(ctx, ListJobsRequest{
-		Limit: 10, Offset: 0,
+		Pagination: &dbtypes.CursorPaginationRequest{Limit: intPtr(10), Offset: intPtr(0)},
 	})
 	for _, job := range resp.Items {
 		if job.Status == StatusRunning {

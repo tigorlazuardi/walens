@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"slices"
 
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/go-jet/jet/v2/qrm"
@@ -38,10 +39,13 @@ type UpdateSubscriptionRequest struct {
 
 type UpdateSubscriptionResponse = model.DeviceSourceSubscriptions
 
-type ListSubscriptionsRequest struct{}
+type ListSubscriptionsRequest struct {
+	Pagination *dbtypes.CursorPaginationRequest `json:"pagination,omitempty"`
+}
 
 type ListSubscriptionsResponse struct {
-	Items []model.DeviceSourceSubscriptions `json:"items" doc:"List of device source subscriptions."`
+	Items      []model.DeviceSourceSubscriptions `json:"items" doc:"List of device source subscriptions."`
+	Pagination *dbtypes.CursorPaginationResponse `json:"pagination"`
 }
 
 type GetSubscriptionRequest struct {
@@ -93,19 +97,61 @@ func (s *Service) countSubscriptions(ctx context.Context, condition BoolExpressi
 	return count.Count, nil
 }
 
-func (s *Service) ListSubscriptions(ctx context.Context, _ ListSubscriptionsRequest) (ListSubscriptionsResponse, error) {
+func (s *Service) ListSubscriptions(ctx context.Context, req ListSubscriptionsRequest) (ListSubscriptionsResponse, error) {
 	var items []model.DeviceSourceSubscriptions
-	stmt := SELECT(DeviceSourceSubscriptions.AllColumns).FROM(DeviceSourceSubscriptions).ORDER_BY(DeviceSourceSubscriptions.CreatedAt.ASC())
+	cond := Bool(true)
+	next := req.Pagination.NextToken()
+	prev := req.Pagination.PrevToken()
+	isPrev := next == "" && prev != ""
+	if next != "" {
+		cond = cond.AND(DeviceSourceSubscriptions.ID.GT(String(next)))
+	}
+	if isPrev {
+		cond = cond.AND(DeviceSourceSubscriptions.ID.LT(String(prev)))
+	}
+
+	orderBy, err := req.Pagination.BuildOrderByClause(DeviceSourceSubscriptions.AllColumns)
+	if err != nil {
+		return ListSubscriptionsResponse{}, err
+	}
+	if len(orderBy) == 0 {
+		orderBy = append(orderBy, DeviceSourceSubscriptions.CreatedAt.ASC())
+	}
+	if isPrev {
+		orderBy = append(orderBy, DeviceSourceSubscriptions.ID.DESC())
+	} else {
+		orderBy = append(orderBy, DeviceSourceSubscriptions.ID.ASC())
+	}
+
+	limit := req.Pagination.GetLimitOrDefault(20, 100)
+	stmt := SELECT(DeviceSourceSubscriptions.AllColumns).
+		FROM(DeviceSourceSubscriptions).
+		WHERE(cond).
+		ORDER_BY(orderBy...).
+		LIMIT(limit + 1).
+		OFFSET(req.Pagination.GetOffset())
 	if err := stmt.QueryContext(ctx, s.db, &items); err != nil {
-		if errors.Is(err, qrm.ErrNoRows) {
-			return ListSubscriptionsResponse{Items: []model.DeviceSourceSubscriptions{}}, nil
-		}
 		return ListSubscriptionsResponse{}, huma.Error500InternalServerError("failed to list device subscriptions", err)
 	}
-	if items == nil {
+	if len(items) == 0 {
 		return ListSubscriptionsResponse{Items: []model.DeviceSourceSubscriptions{}}, nil
 	}
-	return ListSubscriptionsResponse{Items: items}, nil
+
+	hasMore := len(items) > int(limit)
+	if hasMore {
+		items = items[:limit]
+	}
+	cursor := &dbtypes.CursorPaginationResponse{}
+	if isPrev {
+		slices.Reverse(items)
+	}
+	if hasMore {
+		cursor.Next = items[len(items)-1].ID
+	}
+	if next != "" {
+		cursor.Prev = items[0].ID
+	}
+	return ListSubscriptionsResponse{Items: items, Pagination: cursor}, nil
 }
 
 func (s *Service) GetSubscription(ctx context.Context, req GetSubscriptionRequest) (GetSubscriptionResponse, error) {

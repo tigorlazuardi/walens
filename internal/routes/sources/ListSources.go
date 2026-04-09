@@ -27,9 +27,7 @@ type ListSourcesInput struct {
 
 // ListSourcesOutput describes the response body for ListSources.
 type ListSourcesOutput struct {
-	Body struct {
-		Items []sourcesvc.SourceRow `json:"items" doc:"List of configured sources."`
-	}
+	Body sourcesvc.ListSourcesResponse
 }
 
 // ListSources handles POST /api/v1/sources/ListSources.
@@ -41,10 +39,6 @@ func ListSources(ctx context.Context, input *ListSourcesInput, svc *sourcesvc.Se
 	}
 
 	return &ListSourcesOutput{
-		Body: struct {
-			Items []sourcesvc.SourceRow `json:"items" doc:"List of configured sources."`
-		}{
-			Items: resp.Items,
-		},
+		Body: resp,
 	}, nil
 }

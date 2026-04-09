@@ -68,7 +68,9 @@ func (s *Service) ListDevices(ctx context.Context, req ListDevicesRequest) (List
 		return ListDevicesResponse{Items: []model.Devices{}}, nil
 	}
 	hasMore := len(items) > int(limit)
-	items = items[:limit]
+	if hasMore {
+		items = items[:limit]
+	}
 	cursor := &dbtypes.CursorPaginationResponse{}
 	if isPrev {
 		slices.Reverse(items)

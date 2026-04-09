@@ -3,12 +3,14 @@ package jobs
 import (
 	"context"
 	"errors"
+	"slices"
 
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/go-jet/jet/v2/qrm"
 	. "github.com/go-jet/jet/v2/sqlite"
 	"github.com/walens/walens/internal/db/generated/model"
 	. "github.com/walens/walens/internal/db/generated/table"
+	"github.com/walens/walens/internal/dbtypes"
 )
 
 // GetJob retrieves a single job by ID using QRM mapping into the generated model.
@@ -47,33 +49,60 @@ func (s *Service) ListJobs(ctx context.Context, req ListJobsRequest) (ListJobsRe
 		condition = condition.AND(Jobs.TriggerKind.EQ(String(*req.TriggerKind)))
 	}
 
-	var countDest struct {
-		Count int64
+	next := req.Pagination.NextToken()
+	prev := req.Pagination.PrevToken()
+	isPrev := next == "" && prev != ""
+	if next != "" {
+		condition = condition.AND(Jobs.ID.GT(String(next)))
+	}
+	if isPrev {
+		condition = condition.AND(Jobs.ID.LT(String(prev)))
 	}
 
-	countStmt := SELECT(COUNT(Jobs.ID).AS("count")).
-		FROM(Jobs).
-		WHERE(condition)
-
-	if err := countStmt.QueryContext(ctx, s.db, &countDest); err != nil {
-		return ListJobsResponse{}, huma.Error500InternalServerError("failed to count jobs", err)
+	orderBy, err := req.Pagination.BuildOrderByClause(Jobs.AllColumns)
+	if err != nil {
+		return ListJobsResponse{}, err
 	}
+	if len(orderBy) == 0 {
+		orderBy = append(orderBy, Jobs.CreatedAt.DESC())
+	}
+	if isPrev {
+		orderBy = append(orderBy, Jobs.ID.DESC())
+	} else {
+		orderBy = append(orderBy, Jobs.ID.ASC())
+	}
+
+	limit := req.Pagination.GetLimitOrDefault(20, 100)
 
 	var items []model.Jobs
 	stmt := SELECT(Jobs.AllColumns).
 		FROM(Jobs).
 		WHERE(condition).
-		ORDER_BY(Jobs.CreatedAt.DESC()).
-		LIMIT(int64(req.Limit)).
-		OFFSET(int64(req.Offset))
+		ORDER_BY(orderBy...).
+		LIMIT(limit + 1).
+		OFFSET(req.Pagination.GetOffset())
 
 	if err := stmt.QueryContext(ctx, s.db, &items); err != nil {
-		if errors.Is(err, qrm.ErrNoRows) {
-			items = []model.Jobs{}
-		} else {
-			return ListJobsResponse{}, huma.Error500InternalServerError("failed to list jobs", err)
-		}
+		return ListJobsResponse{}, huma.Error500InternalServerError("failed to list jobs", err)
+	}
+	if len(items) == 0 {
+		return ListJobsResponse{Items: []model.Jobs{}}, nil
 	}
 
-	return ListJobsResponse{Items: items, Total: countDest.Count}, nil
+	hasMore := len(items) > int(limit)
+	if hasMore {
+		items = items[:limit]
+	}
+	cursor := &dbtypes.CursorPaginationResponse{}
+	if isPrev {
+		slices.Reverse(items)
+	}
+	if hasMore {
+		cursor.Next = items[len(items)-1].ID
+	}
+	if next != "" {
+		cursor.Prev = items[0].ID
+	}
+
+	return ListJobsResponse{Items: items, Pagination: cursor}, nil
 }
