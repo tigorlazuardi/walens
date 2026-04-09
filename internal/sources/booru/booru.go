@@ -4,17 +4,21 @@ package booru
 import (
 	"context"
 	"encoding/json"
+	"encoding/xml"
 	"fmt"
 	"iter"
+	"net/http"
 	"net/url"
+	"path"
 	"strings"
 
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/walens/walens/internal/sources"
 )
 
+var booruHTTPClient = http.DefaultClient
+
 // BooruSource implements a simple tag-based image board source.
-// This is a placeholder implementation for demonstration purposes.
 type BooruSource struct{}
 
 // BooruParams defines the configuration for a booru source.
@@ -101,18 +105,181 @@ func (s *BooruSource) DefaultLookupCount() int {
 	return 100
 }
 
-// Fetch implements sources.Source by returning an empty iterator.
-// This is a placeholder - real implementation would query the booru API.
+// booruPostsResponse represents the XML response from the Gelbooru API.
+type booruPostsResponse struct {
+	Count  int         `xml:"count,attr"`
+	Offset int         `xml:"offset,attr"`
+	Posts  []booruPost `xml:"post"`
+}
+
+// booruPost represents a single post element in the Gelbooru XML response.
+type booruPost struct {
+	XMLName    xml.Name `xml:"post"`
+	ID         string   `xml:"id,attr"`
+	PreviewURL string   `xml:"preview_url,attr"`
+	FileURL    string   `xml:"file_url,attr"`
+	Tags       string   `xml:"tags,attr"`
+	Rating     string   `xml:"rating,attr"`
+	Score      int      `xml:"score,attr"`
+	Width      int      `xml:"width,attr"`
+	Height     int      `xml:"height,attr"`
+	Source     string   `xml:"source,attr"`
+	CreatorID  string   `xml:"creator_id,attr"`
+	MD5        string   `xml:"md5,attr"`
+}
+
+// Fetch implements sources.Source by querying the booru API.
 func (s *BooruSource) Fetch(ctx context.Context, req sources.FetchRequest) iter.Seq2[sources.ImageMetadata, error] {
 	return func(yield func(sources.ImageMetadata, error) bool) {
-		// Placeholder: yield no images
-		// Real implementation would:
-		// 1. Parse params
-		// 2. Build API request to booru host
-		// 3. Paginate through results
-		// 4. Yield ImageMetadata items
-		_ = ctx
-		_ = req
+		if err := ctx.Err(); err != nil {
+			yield(sources.ImageMetadata{}, err)
+			return
+		}
+
+		var params BooruParams
+		if err := json.Unmarshal(req.Params, &params); err != nil {
+			yield(sources.ImageMetadata{}, fmt.Errorf("invalid params JSON: %w", err))
+			return
+		}
+
+		remaining := req.LookupCount
+		if remaining <= 0 {
+			remaining = s.DefaultLookupCount()
+		}
+
+		pageOffset := 0
+		pageLimit := 100
+		if pageLimit > remaining {
+			pageLimit = remaining
+		}
+
+		for remaining > 0 {
+			if err := ctx.Err(); err != nil {
+				yield(sources.ImageMetadata{}, err)
+				return
+			}
+
+			apiURL, err := buildBooruURL(params.BooruHost, params, pageLimit, pageOffset)
+			if err != nil {
+				yield(sources.ImageMetadata{}, fmt.Errorf("build booru URL: %w", err))
+				return
+			}
+
+			posts, err := fetchPosts(ctx, apiURL)
+			if err != nil {
+				yield(sources.ImageMetadata{}, fmt.Errorf("fetch posts: %w", err))
+				return
+			}
+
+			if len(posts) == 0 {
+				return
+			}
+
+			for _, post := range posts {
+				if err := ctx.Err(); err != nil {
+					yield(sources.ImageMetadata{}, err)
+					return
+				}
+
+				remaining--
+				metadata := postToImageMetadata(post)
+				if metadata.SourceItemID == "" {
+					continue
+				}
+				if !yield(metadata, nil) {
+					return
+				}
+				if remaining == 0 {
+					return
+				}
+			}
+
+			pageOffset++
+		}
+	}
+}
+
+// fetchPosts retrieves and parses posts from the booru API.
+func fetchPosts(ctx context.Context, apiURL string) ([]booruPost, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+	req.Header.Set("User-Agent", "walens/0.1 (+https://github.com/walens/walens)")
+
+	resp, err := booruHTTPClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("fetch posts: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("booru request failed with status %d", resp.StatusCode)
+	}
+
+	var postsResp booruPostsResponse
+	if err := xml.NewDecoder(resp.Body).Decode(&postsResp); err != nil {
+		return nil, fmt.Errorf("decode XML response: %w", err)
+	}
+
+	return postsResp.Posts, nil
+}
+
+// postToImageMetadata transforms a booru post into ImageMetadata.
+func postToImageMetadata(post booruPost) sources.ImageMetadata {
+	if post.ID == "" || post.FileURL == "" {
+		return sources.ImageMetadata{}
+	}
+
+	aspectRatio := 0.0
+	if post.Width > 0 && post.Height > 0 {
+		aspectRatio = float64(post.Width) / float64(post.Height)
+	}
+
+	tags := strings.Fields(post.Tags)
+
+	isAdult := false
+	switch strings.ToLower(post.Rating) {
+	case "explicit", "questionable":
+		isAdult = true
+	}
+
+	mimeType := detectImageMimeType(post.FileURL)
+
+	return sources.ImageMetadata{
+		UniqueIdentifier: post.MD5,
+		PreviewURL:       post.PreviewURL,
+		OriginURL:        post.FileURL,
+		SourceItemID:     post.ID,
+		OriginalID:       post.ID,
+		Uploader:         post.CreatorID,
+		MimeType:         mimeType,
+		Width:            post.Width,
+		Height:           post.Height,
+		AspectRatio:      aspectRatio,
+		IsAdult:          isAdult,
+		Tags:             tags,
+	}
+}
+
+// detectImageMimeType determines the MIME type from a file URL extension.
+func detectImageMimeType(fileURL string) string {
+	parsed, err := url.Parse(fileURL)
+	if err != nil {
+		return ""
+	}
+	ext := strings.ToLower(path.Ext(parsed.Path))
+	switch ext {
+	case ".jpg", ".jpeg":
+		return "image/jpeg"
+	case ".png":
+		return "image/png"
+	case ".webp":
+		return "image/webp"
+	case ".gif":
+		return "image/gif"
+	default:
+		return ""
 	}
 }
 
@@ -125,7 +292,7 @@ func (s *BooruSource) BuildUniqueID(item sources.ImageMetadata) (string, error) 
 }
 
 // buildBooruURL constructs the API URL for a booru query.
-func buildBooruURL(host string, params BooruParams, limit int) (string, error) {
+func buildBooruURL(host string, params BooruParams, limit int, pid int) (string, error) {
 	if host == "" {
 		host = "gelbooru.com"
 	}
@@ -141,6 +308,7 @@ func buildBooruURL(host string, params BooruParams, limit int) (string, error) {
 	q.Set("s", "post")
 	q.Set("q", "index")
 	q.Set("limit", fmt.Sprintf("%d", limit))
+	q.Set("pid", fmt.Sprintf("%d", pid))
 
 	if len(params.Tags) > 0 {
 		q.Set("tags", strings.Join(params.Tags, "+"))
