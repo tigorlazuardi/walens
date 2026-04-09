@@ -19,17 +19,26 @@ type ListSourcesRequest struct {
 type ListSourcesResponse struct {
 	Items      []model.Sources                   `json:"items" doc:"List of configured sources."`
 	Pagination *dbtypes.CursorPaginationResponse `json:"pagination"`
+	Total      int64                             `json:"total" doc:"Total count of sources matching filters, independent of pagination"`
 }
 
 // ListSources returns configured source rows.
 func (s *Service) ListSources(ctx context.Context, req ListSourcesRequest) (ListSourcesResponse, error) {
 	var items []model.Sources
-	cond := Bool(true)
+	baseCond := Bool(true)
 	if req.Search != nil && *req.Search != "" {
 		pattern := String("%" + *req.Search + "%")
-		cond = cond.AND(Sources.Name.LIKE(pattern))
+		baseCond = baseCond.AND(Sources.Name.LIKE(pattern))
 	}
 
+	// Get total count before pagination filters
+	total, err := s.countSources(ctx, baseCond)
+	if err != nil {
+		return ListSourcesResponse{}, err
+	}
+
+	// Pagination - build condition with cursor filters
+	cond := baseCond
 	next := req.Pagination.NextToken()
 	prev := req.Pagination.PrevToken()
 	isPrev := next == "" && prev != ""
@@ -65,7 +74,7 @@ func (s *Service) ListSources(ctx context.Context, req ListSourcesRequest) (List
 		return ListSourcesResponse{}, huma.Error500InternalServerError("failed to list sources", err)
 	}
 	if len(items) == 0 {
-		return ListSourcesResponse{Items: []model.Sources{}}, nil
+		return ListSourcesResponse{Items: []model.Sources{}, Total: total}, nil
 	}
 
 	hasMore := len(items) > int(limit)
@@ -83,5 +92,5 @@ func (s *Service) ListSources(ctx context.Context, req ListSourcesRequest) (List
 		cursor.Prev = items[0].ID
 	}
 
-	return ListSourcesResponse{Items: items, Pagination: cursor}, nil
+	return ListSourcesResponse{Items: items, Pagination: cursor, Total: total}, nil
 }

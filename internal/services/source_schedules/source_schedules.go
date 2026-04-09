@@ -149,3 +149,14 @@ func (s *Service) countSources(ctx context.Context, id dbtypes.UUID) (int64, err
 	}
 	return count.Count, nil
 }
+
+func (s *Service) countSchedules(ctx context.Context, condition BoolExpression) (int64, error) {
+	var count struct {
+		Count int64 `alias:"count"`
+	}
+	stmt := SELECT(COUNT(SourceSchedules.ID).AS("count")).FROM(SourceSchedules).WHERE(condition)
+	if err := stmt.QueryContext(ctx, s.db, &count); err != nil {
+		return 0, fmt.Errorf("count schedules: %w", err)
+	}
+	return count.Count, nil
+}

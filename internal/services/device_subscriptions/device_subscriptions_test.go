@@ -3,6 +3,7 @@ package device_subscriptions
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"testing"
 
 	"github.com/walens/walens/internal/dbtypes"
@@ -516,5 +517,108 @@ func TestServiceDeleteSubscriptionNotFound(t *testing.T) {
 	_, err := svc.DeleteSubscription(context.Background(), DeleteSubscriptionRequest{ID: id})
 	if err == nil {
 		t.Errorf("expected ErrSubscriptionNotFound, got %v", err)
+	}
+}
+
+// TestListSubscriptions_TotalCount verifies Total reflects all rows independent of pagination.
+func TestListSubscriptions_TotalCount(t *testing.T) {
+	db, cleanup := testDB(t)
+	defer cleanup()
+	createTables(t, db)
+
+	// Create 2 devices and 8 sources
+	insertTestDevice(t, db, "01800000-0000-0000-0000-000000000001", "Device 1", "device-1")
+	insertTestDevice(t, db, "01800000-0000-0000-0000-000000000002", "Device 2", "device-2")
+	for i := 0; i < 8; i++ {
+		insertTestSource(t, db, fmt.Sprintf("01800000-0000-0000-0000-%012d", i+1), fmt.Sprintf("Source %d", i))
+	}
+
+	// Create 5 subscriptions for device 1 with different sources
+	for i := 0; i < 5; i++ {
+		_, err := db.Exec(`
+			INSERT INTO device_source_subscriptions (id, device_id, source_id, is_enabled, created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?)`,
+			fmt.Sprintf("02800000-0000-0000-0000-%012d", i+1),
+			"01800000-0000-0000-0000-000000000001",
+			fmt.Sprintf("01800000-0000-0000-0000-%012d", i+1),
+			1, 1000, 1000,
+		)
+		if err != nil {
+			t.Fatalf("insert test subscription: %v", err)
+		}
+	}
+
+	// Create 3 subscriptions for device 2 with different sources
+	for i := 5; i < 8; i++ {
+		_, err := db.Exec(`
+			INSERT INTO device_source_subscriptions (id, device_id, source_id, is_enabled, created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?)`,
+			fmt.Sprintf("02800000-0000-0000-0000-%012d", i+1),
+			"01800000-0000-0000-0000-000000000002",
+			fmt.Sprintf("01800000-0000-0000-0000-%012d", i+1),
+			1, 1000, 1000,
+		)
+		if err != nil {
+			t.Fatalf("insert test subscription: %v", err)
+		}
+	}
+
+	svc := NewService(db)
+
+	// Test: Total should be 8 (all subscriptions)
+	resp, err := svc.ListSubscriptions(context.Background(), ListSubscriptionsRequest{})
+	if err != nil {
+		t.Fatalf("ListSubscriptions failed: %v", err)
+	}
+	if resp.Total != 8 {
+		t.Errorf("expected Total=8 for all subscriptions, got %d", resp.Total)
+	}
+}
+
+// TestListSubscriptions_TotalNotAffectedByPagination verifies Total is independent of Limit.
+func TestListSubscriptions_TotalNotAffectedByPagination(t *testing.T) {
+	db, cleanup := testDB(t)
+	defer cleanup()
+	createTables(t, db)
+
+	// Create 1 device and 6 sources
+	insertTestDevice(t, db, "01800000-0000-0000-0000-000000000001", "Device 1", "device-1")
+	for i := 0; i < 6; i++ {
+		insertTestSource(t, db, fmt.Sprintf("01800000-0000-0000-0000-%012d", i+1), fmt.Sprintf("Source %d", i))
+	}
+
+	// Create 6 subscriptions with different sources
+	for i := 0; i < 6; i++ {
+		_, err := db.Exec(`
+			INSERT INTO device_source_subscriptions (id, device_id, source_id, is_enabled, created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?)`,
+			fmt.Sprintf("02800000-0000-0000-0000-%012d", i+1),
+			"01800000-0000-0000-0000-000000000001",
+			fmt.Sprintf("01800000-0000-0000-0000-%012d", i+1),
+			1, 1000, 1000,
+		)
+		if err != nil {
+			t.Fatalf("insert test subscription: %v", err)
+		}
+	}
+
+	svc := NewService(db)
+
+	// First page with small limit
+	limit := 2
+	resp, err := svc.ListSubscriptions(context.Background(), ListSubscriptionsRequest{
+		Pagination: &dbtypes.CursorPaginationRequest{Limit: &limit},
+	})
+	if err != nil {
+		t.Fatalf("ListSubscriptions with limit failed: %v", err)
+	}
+
+	// Items should be limited to 2
+	if len(resp.Items) > 2 {
+		t.Errorf("expected at most 2 items, got %d", len(resp.Items))
+	}
+	// But Total should still be 6
+	if resp.Total != 6 {
+		t.Errorf("expected Total=6 (independent of pagination), got %d", resp.Total)
 	}
 }

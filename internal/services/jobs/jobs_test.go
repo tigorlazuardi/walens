@@ -908,6 +908,105 @@ func TestListJobsWithFilter(t *testing.T) {
 	}
 }
 
+// TestListJobs_TotalCount verifies Total reflects all matching rows independent of pagination.
+func TestListJobs_TotalCount(t *testing.T) {
+	db := openTestDB(t)
+	defer db.Close()
+	createJobsTable(t, db)
+
+	svc := NewService(db)
+	ctx := context.Background()
+
+	// Create 5 queued jobs
+	for i := 0; i < 5; i++ {
+		input := &CreateJobRequest{
+			JobType:     JobTypeSourceSync,
+			TriggerKind: TriggerKindManual,
+			RunAfter:    time.Now().UTC(),
+		}
+		_, err := svc.CreateJob(ctx, *input)
+		if err != nil {
+			t.Fatalf("CreateJob failed: %v", err)
+		}
+	}
+
+	// Create 3 running jobs
+	for i := 0; i < 3; i++ {
+		input := &CreateJobRequest{
+			JobType:     JobTypeSourceSync,
+			TriggerKind: TriggerKindManual,
+			RunAfter:    time.Now().UTC(),
+		}
+		job, _ := svc.CreateJob(ctx, *input)
+		svc.StartJob(ctx, StartJobRequest{ID: *job.ID})
+	}
+
+	// Test: Total should be 8 for all jobs
+	respAll, err := svc.ListJobs(ctx, ListJobsRequest{
+		Pagination: &dbtypes.CursorPaginationRequest{Limit: intPtr(10), Offset: intPtr(0)},
+	})
+	if err != nil {
+		t.Fatalf("ListJobs failed: %v", err)
+	}
+	if respAll.Total != 8 {
+		t.Errorf("expected Total=8 for all jobs, got %d", respAll.Total)
+	}
+
+	// Test: Total should be 5 when filtering by StatusQueued
+	queuedStatus := StatusQueued
+	respQueued, err := svc.ListJobs(ctx, ListJobsRequest{
+		Status:     &queuedStatus,
+		Pagination: &dbtypes.CursorPaginationRequest{Limit: intPtr(10), Offset: intPtr(0)},
+	})
+	if err != nil {
+		t.Fatalf("ListJobs with status filter failed: %v", err)
+	}
+	if respQueued.Total != 5 {
+		t.Errorf("expected Total=5 for queued jobs, got %d", respQueued.Total)
+	}
+}
+
+// TestListJobs_TotalNotAffectedByPagination verifies Total is independent of Limit.
+func TestListJobs_TotalNotAffectedByPagination(t *testing.T) {
+	db := openTestDB(t)
+	defer db.Close()
+	createJobsTable(t, db)
+
+	svc := NewService(db)
+	ctx := context.Background()
+
+	// Create 10 jobs
+	for i := 0; i < 10; i++ {
+		input := &CreateJobRequest{
+			JobType:     JobTypeSourceSync,
+			TriggerKind: TriggerKindManual,
+			RunAfter:    time.Now().UTC(),
+		}
+		_, err := svc.CreateJob(ctx, *input)
+		if err != nil {
+			t.Fatalf("CreateJob failed: %v", err)
+		}
+	}
+
+	// First page with small limit
+	limit := 3
+	resp, err := svc.ListJobs(ctx, ListJobsRequest{
+		Pagination: &dbtypes.CursorPaginationRequest{Limit: intPtr(limit), Offset: intPtr(0)},
+	})
+	if err != nil {
+		t.Fatalf("ListJobs with limit failed: %v", err)
+	}
+
+	// Items should be limited to 3
+	if len(resp.Items) > 3 {
+		t.Errorf("expected at most 3 items, got %d", len(resp.Items))
+	}
+	// But Total should still be 10
+	if resp.Total != 10 {
+		t.Errorf("expected Total=10 (independent of pagination), got %d", resp.Total)
+	}
+}
+
 func TestStartJob(t *testing.T) {
 	db := openTestDB(t)
 	defer db.Close()

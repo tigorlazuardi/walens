@@ -2,13 +2,16 @@
 package jobs
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
 
+	. "github.com/go-jet/jet/v2/sqlite"
 	"github.com/walens/walens/internal/db/generated/model"
+	. "github.com/walens/walens/internal/db/generated/table"
 	"github.com/walens/walens/internal/dbtypes"
 )
 
@@ -94,6 +97,7 @@ type ListJobsRequest struct {
 type ListJobsResponse struct {
 	Items      []model.Jobs                      `json:"items" doc:"List of jobs."`
 	Pagination *dbtypes.CursorPaginationResponse `json:"pagination"`
+	Total      int64                             `json:"total" doc:"Total count of jobs matching filters, independent of pagination"`
 }
 
 type GetJobRequest struct {
@@ -139,6 +143,17 @@ type Service struct {
 // NewService creates a new jobs service.
 func NewService(db *sql.DB) *Service {
 	return &Service{db: db}
+}
+
+func (s *Service) countJobs(ctx context.Context, condition BoolExpression) (int64, error) {
+	var count struct {
+		Count int64 `alias:"count"`
+	}
+	stmt := SELECT(COUNT(Jobs.ID).AS("count")).FROM(Jobs).WHERE(condition)
+	if err := stmt.QueryContext(ctx, s.db, &count); err != nil {
+		return 0, fmt.Errorf("count jobs: %w", err)
+	}
+	return count.Count, nil
 }
 
 func ensureJSON(raw json.RawMessage) dbtypes.RawJSON {

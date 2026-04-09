@@ -46,6 +46,7 @@ type ListSubscriptionsRequest struct {
 type ListSubscriptionsResponse struct {
 	Items      []model.DeviceSourceSubscriptions `json:"items" doc:"List of device source subscriptions."`
 	Pagination *dbtypes.CursorPaginationResponse `json:"pagination"`
+	Total      int64                             `json:"total" doc:"Total count of subscriptions matching filters, independent of pagination"`
 }
 
 type GetSubscriptionRequest struct {
@@ -99,7 +100,16 @@ func (s *Service) countSubscriptions(ctx context.Context, condition BoolExpressi
 
 func (s *Service) ListSubscriptions(ctx context.Context, req ListSubscriptionsRequest) (ListSubscriptionsResponse, error) {
 	var items []model.DeviceSourceSubscriptions
-	cond := Bool(true)
+	baseCond := Bool(true)
+
+	// Get total count before pagination filters
+	total, err := s.countSubscriptions(ctx, baseCond)
+	if err != nil {
+		return ListSubscriptionsResponse{}, err
+	}
+
+	// Pagination - build condition with cursor filters
+	cond := baseCond
 	next := req.Pagination.NextToken()
 	prev := req.Pagination.PrevToken()
 	isPrev := next == "" && prev != ""
@@ -134,7 +144,7 @@ func (s *Service) ListSubscriptions(ctx context.Context, req ListSubscriptionsRe
 		return ListSubscriptionsResponse{}, huma.Error500InternalServerError("failed to list device subscriptions", err)
 	}
 	if len(items) == 0 {
-		return ListSubscriptionsResponse{Items: []model.DeviceSourceSubscriptions{}}, nil
+		return ListSubscriptionsResponse{Items: []model.DeviceSourceSubscriptions{}, Total: total}, nil
 	}
 
 	hasMore := len(items) > int(limit)
@@ -151,7 +161,7 @@ func (s *Service) ListSubscriptions(ctx context.Context, req ListSubscriptionsRe
 	if next != "" {
 		cursor.Prev = items[0].ID
 	}
-	return ListSubscriptionsResponse{Items: items, Pagination: cursor}, nil
+	return ListSubscriptionsResponse{Items: items, Pagination: cursor, Total: total}, nil
 }
 
 func (s *Service) GetSubscription(ctx context.Context, req GetSubscriptionRequest) (GetSubscriptionResponse, error) {

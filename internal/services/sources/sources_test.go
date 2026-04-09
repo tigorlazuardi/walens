@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"testing"
 
 	"github.com/walens/walens/internal/dbtypes"
@@ -423,5 +424,104 @@ func TestServiceReturnsErrRegistryUnavailableWhenRegistryIsNil(t *testing.T) {
 	})
 	if err == nil {
 		t.Errorf("expected ErrRegistryUnavailable, got %v", err)
+	}
+}
+
+// TestListSources_TotalCount verifies that Total reflects all matching rows independent of pagination.
+func TestListSources_TotalCount(t *testing.T) {
+	db := openTestDB(t)
+	defer db.Close()
+	createSourcesTable(t, db)
+
+	// Insert 5 sources with "alpha" in name
+	for i := 0; i < 5; i++ {
+		_, err := db.Exec(`
+			INSERT INTO sources (id, name, source_type, params, lookup_count, is_enabled, created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+			fmt.Sprintf("01800000-0000-0000-0000-%012d", i),
+			fmt.Sprintf("alpha-source-%d", i), "booru",
+			`{}`, 100, 1, 1000, 1000,
+		)
+		if err != nil {
+			t.Fatalf("insert test source: %v", err)
+		}
+	}
+
+	// Insert 3 sources with "beta" in name
+	for i := 5; i < 8; i++ {
+		_, err := db.Exec(`
+			INSERT INTO sources (id, name, source_type, params, lookup_count, is_enabled, created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+			fmt.Sprintf("01800000-0000-0000-0000-%012d", i),
+			fmt.Sprintf("beta-source-%d", i), "booru",
+			`{}`, 100, 1, 1000, 1000,
+		)
+		if err != nil {
+			t.Fatalf("insert test source: %v", err)
+		}
+	}
+
+	svc := NewService(db, testRegistry())
+
+	// Test: Total should be 5 for search matching "alpha"
+	search := "alpha"
+	resp, err := svc.ListSources(context.Background(), ListSourcesRequest{
+		Search: &search,
+	})
+	if err != nil {
+		t.Fatalf("ListSources with search failed: %v", err)
+	}
+	if resp.Total != 5 {
+		t.Errorf("expected Total=5 for search 'alpha', got %d", resp.Total)
+	}
+
+	// Test: Total should be 8 when no search filter (all sources)
+	respAll, err := svc.ListSources(context.Background(), ListSourcesRequest{})
+	if err != nil {
+		t.Fatalf("ListSources without search failed: %v", err)
+	}
+	if respAll.Total != 8 {
+		t.Errorf("expected Total=8 for all sources, got %d", respAll.Total)
+	}
+}
+
+// TestListSources_TotalNotAffectedByPagination verifies Total is independent of Limit.
+func TestListSources_TotalNotAffectedByPagination(t *testing.T) {
+	db := openTestDB(t)
+	defer db.Close()
+	createSourcesTable(t, db)
+
+	// Insert 10 sources
+	for i := 0; i < 10; i++ {
+		_, err := db.Exec(`
+			INSERT INTO sources (id, name, source_type, params, lookup_count, is_enabled, created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+			fmt.Sprintf("01800000-0000-0000-0000-%012d", i),
+			fmt.Sprintf("source-%d", i), "booru",
+			`{}`, 100, 1, 1000, 1000,
+		)
+		if err != nil {
+			t.Fatalf("insert test source: %v", err)
+		}
+	}
+
+	svc := NewService(db, testRegistry())
+
+	// First page with small limit
+	limit := 3
+	resp, err := svc.ListSources(context.Background(), ListSourcesRequest{
+		Pagination: &dbtypes.CursorPaginationRequest{Limit: &limit},
+	})
+	if err != nil {
+		t.Fatalf("ListSources with limit failed: %v", err)
+	}
+
+	// Items should be limited to 3
+	if len(resp.Items) > 3 {
+		t.Errorf("expected at most 3 items, got %d", len(resp.Items))
+	}
+	// But Total should still be 10
+	if resp.Total != 10 {
+		t.Errorf("expected Total=10 (independent of pagination), got %d", resp.Total)
 	}
 }

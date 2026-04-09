@@ -21,12 +21,22 @@ type ListSchedulesRequest struct {
 type ListSchedulesResponse struct {
 	Items      []model.SourceSchedules           `json:"items" doc:"List of source schedules."`
 	Pagination *dbtypes.CursorPaginationResponse `json:"pagination"`
+	Total      int64                             `json:"total" doc:"Total count of schedules matching filters, independent of pagination"`
 }
 
 // ListSchedules returns all source schedules ordered by creation time.
 func (s *Service) ListSchedules(ctx context.Context, req ListSchedulesRequest) (ListSchedulesResponse, error) {
 	var items []model.SourceSchedules
-	cond := Bool(true)
+	baseCond := Bool(true)
+
+	// Get total count before pagination filters
+	total, err := s.countSchedules(ctx, baseCond)
+	if err != nil {
+		return ListSchedulesResponse{}, err
+	}
+
+	// Pagination - build condition with cursor filters
+	cond := baseCond
 	next := req.Pagination.NextToken()
 	prev := req.Pagination.PrevToken()
 	isPrev := next == "" && prev != ""
@@ -61,7 +71,7 @@ func (s *Service) ListSchedules(ctx context.Context, req ListSchedulesRequest) (
 		return ListSchedulesResponse{}, huma.Error500InternalServerError("failed to list source schedules", err)
 	}
 	if len(items) == 0 {
-		return ListSchedulesResponse{Items: []model.SourceSchedules{}}, nil
+		return ListSchedulesResponse{Items: []model.SourceSchedules{}, Total: total}, nil
 	}
 
 	hasMore := len(items) > int(limit)
@@ -78,7 +88,7 @@ func (s *Service) ListSchedules(ctx context.Context, req ListSchedulesRequest) (
 	if next != "" {
 		cursor.Prev = items[0].ID
 	}
-	return ListSchedulesResponse{Items: items, Pagination: cursor}, nil
+	return ListSchedulesResponse{Items: items, Pagination: cursor, Total: total}, nil
 }
 
 // ListSchedulesWithSourceName returns all source schedules with their parent source name.
