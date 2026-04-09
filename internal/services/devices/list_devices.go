@@ -39,7 +39,7 @@ func (s *Service) ListDevices(ctx context.Context, req ListDevicesRequest) (List
 		cond = cond.AND(Devices.ID.GT(String(next)))
 	}
 	if isPrev {
-		cond = cond.AND(Devices.ID.GT(String(prev)))
+		cond = cond.AND(Devices.ID.LT(String(prev)))
 	}
 	orderBy, err := req.Pagination.BuildOrderByClause(Devices.AllColumns)
 	if err != nil {
