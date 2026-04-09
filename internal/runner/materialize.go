@@ -116,7 +116,7 @@ func (m *Materializer) MaterializeImage(ctx context.Context, req MaterializeRequ
 		}
 
 		// Get or create image record
-		img, _, err := m.imageSvc.GetOrCreateImage(ctx, images.CreateImageRequest{
+		img, isNewImage, err := m.imageSvc.GetOrCreateImage(ctx, images.CreateImageRequest{
 			SourceID:             req.SourceID,
 			UniqueIdentifier:     uniqueID,
 			SourceType:           req.SourceType,
@@ -140,6 +140,9 @@ func (m *Materializer) MaterializeImage(ctx context.Context, req MaterializeRequ
 			m.logger.Warn("failed to get or create image", "error", err, "unique_id", uniqueID)
 			continue
 		}
+
+		// Track if this image is newly created - we count new images toward StoredCount once
+		imageIsNew := isNewImage
 
 		// Get existing locations for this image
 		existingLocations, err := m.imageSvc.GetImageLocations(ctx, *img.ID)
@@ -196,8 +199,8 @@ func (m *Materializer) MaterializeImage(ctx context.Context, req MaterializeRequ
 				}
 				result.DownloadedCount++
 
-				// Create location record
-				_, err = m.imageSvc.CreateImageLocation(ctx, images.CreateImageLocationRequest{
+				// Ensure location record exists (update if already exists)
+				_, err = m.imageSvc.EnsureImageLocation(ctx, images.EnsureImageLocationRequest{
 					ImageID:     *img.ID,
 					DeviceID:    *device.ID,
 					Path:        path,
@@ -206,7 +209,7 @@ func (m *Materializer) MaterializeImage(ctx context.Context, req MaterializeRequ
 					IsActive:    true,
 				})
 				if err != nil {
-					m.logger.Warn("failed to create location record", "error", err)
+					m.logger.Warn("failed to ensure location record", "error", err)
 				}
 				continue
 			}
@@ -215,6 +218,7 @@ func (m *Materializer) MaterializeImage(ctx context.Context, req MaterializeRequ
 			if len(existingLocations) > 0 && canonicalLocation != "" && m.storageSvc.FileExists(canonicalLocation) {
 				// Rule 3: If not assigned but exists elsewhere → hard link, fallback to copy
 				targetPath := m.deviceImagePath(device, uniqueID, item.MimeType)
+				storageKind := StorageKindHardlink
 				err = m.storageSvc.CreateHardLink(canonicalLocation, targetPath)
 				if err != nil {
 					m.logger.Debug("hard link failed, falling back to copy",
@@ -225,6 +229,7 @@ func (m *Materializer) MaterializeImage(ctx context.Context, req MaterializeRequ
 						m.logger.Warn("copy failed", "error", err, "device", device.Slug)
 						continue
 					}
+					storageKind = StorageKindCopy
 					result.CopiedCount++
 					m.logger.Debug("rule 3: copied to device",
 						"device", device.Slug, "unique_id", uniqueID)
@@ -234,23 +239,23 @@ func (m *Materializer) MaterializeImage(ctx context.Context, req MaterializeRequ
 						"device", device.Slug, "unique_id", uniqueID)
 				}
 
-				// Create assignment
-				_, err = m.imageSvc.CreateImageAssignment(ctx, *img.ID, *device.ID)
-				if err != nil && !errors.Is(err, images.ErrAssignmentNotFound) {
-					m.logger.Warn("failed to create assignment", "error", err)
+				// Ensure assignment exists (idempotent - won't fail if already exists)
+				_, err = m.imageSvc.EnsureImageAssignment(ctx, *img.ID, *device.ID)
+				if err != nil {
+					m.logger.Warn("failed to ensure assignment", "error", err)
 				}
 
-				// Create location
-				_, err = m.imageSvc.CreateImageLocation(ctx, images.CreateImageLocationRequest{
+				// Ensure location exists (idempotent - update if already exists)
+				_, err = m.imageSvc.EnsureImageLocation(ctx, images.EnsureImageLocationRequest{
 					ImageID:     *img.ID,
 					DeviceID:    *device.ID,
 					Path:        targetPath,
-					StorageKind: StorageKindHardlink,
+					StorageKind: storageKind,
 					IsPrimary:   true,
 					IsActive:    true,
 				})
 				if err != nil {
-					m.logger.Warn("failed to create location record", "error", err)
+					m.logger.Warn("failed to ensure location record", "error", err)
 				}
 				continue
 			}
@@ -265,14 +270,14 @@ func (m *Materializer) MaterializeImage(ctx context.Context, req MaterializeRequ
 			}
 			result.DownloadedCount++
 
-			// Create assignment
-			_, err = m.imageSvc.CreateImageAssignment(ctx, *img.ID, *device.ID)
-			if err != nil && !errors.Is(err, images.ErrAssignmentNotFound) {
-				m.logger.Warn("failed to create assignment", "error", err)
+			// Ensure assignment exists (idempotent - won't fail if already exists)
+			_, err = m.imageSvc.EnsureImageAssignment(ctx, *img.ID, *device.ID)
+			if err != nil {
+				m.logger.Warn("failed to ensure assignment", "error", err)
 			}
 
-			// Create location
-			_, err = m.imageSvc.CreateImageLocation(ctx, images.CreateImageLocationRequest{
+			// Ensure location exists (idempotent - update if already exists)
+			_, err = m.imageSvc.EnsureImageLocation(ctx, images.EnsureImageLocationRequest{
 				ImageID:     *img.ID,
 				DeviceID:    *device.ID,
 				Path:        path,
@@ -281,14 +286,14 @@ func (m *Materializer) MaterializeImage(ctx context.Context, req MaterializeRequ
 				IsActive:    true,
 			})
 			if err != nil {
-				m.logger.Warn("failed to create location record", "error", err)
+				m.logger.Warn("failed to ensure location record", "error", err)
 			}
-			result.StoredCount++
-		}
 
-		// Periodically update job counters (every 10 images)
-		if processedCount%10 == 0 && m.jobsSvc != nil {
-			m.updateJobCounters(ctx, req.JobID, result)
+			// Only count toward StoredCount if this image was newly created
+			if imageIsNew {
+				result.StoredCount++
+				imageIsNew = false // Only count once per image
+			}
 		}
 	}
 
