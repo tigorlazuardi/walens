@@ -25,11 +25,13 @@ import (
 	"github.com/walens/walens/internal/runner"
 	"github.com/walens/walens/internal/scheduler"
 	"github.com/walens/walens/internal/services/configs"
+	"github.com/walens/walens/internal/services/images"
 	"github.com/walens/walens/internal/services/jobs"
 	sourcesvc "github.com/walens/walens/internal/services/sources"
 	"github.com/walens/walens/internal/sources"
 	"github.com/walens/walens/internal/sources/booru"
 	"github.com/walens/walens/internal/sources/reddit"
+	"github.com/walens/walens/internal/storage"
 )
 
 type authCookieSecureContextKey struct{}
@@ -43,6 +45,8 @@ type App struct {
 	jobsService    *jobs.Service
 	sourcesService *sourcesvc.Service
 	sourceRegistry *sources.Registry
+	storageSvc     *storage.Service
+	imageSvc       *images.Service
 	server         *http.Server
 	scheduler      *scheduler.Scheduler
 	queue          *queue.Queue
@@ -173,12 +177,19 @@ func (a *App) initDB() error {
 	// Note: BasePath is NOT applied from persisted config - it is bootstrap-only.
 	a.config.ApplyPersistedConfig(persistedCfg.DataDir, persistedCfg.LogLevel)
 
+	// Initialize storage and image services with the persisted data directory.
+	a.storageSvc = storage.NewService(storage.Config{BaseDir: persistedCfg.DataDir})
+	a.imageSvc = images.NewService(a.db)
+
 	// Rebuild logger with persisted log level, then rebuild dependent components.
 	a.logger = logger.New(persistedCfg.LogLevel)
 	a.queue = queue.New(a.logger)
 	a.runner = runner.New(a.logger)
 	a.runner.SetQueue(a.queue)
 	a.runner.SetJobsService(a.jobsService)
+	a.runner.SetStorageService(a.storageSvc)
+	a.runner.SetImageService(a.imageSvc)
+	a.runner.SetSourceRegistry(a.sourceRegistry)
 	a.scheduler = scheduler.New(a.logger)
 
 	// Give scheduler access to DB and jobs service for reload queries and job creation

@@ -2,25 +2,34 @@ package runner
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sync"
 	"time"
 
+	"github.com/walens/walens/internal/db/generated/model"
 	"github.com/walens/walens/internal/dbtypes"
 	"github.com/walens/walens/internal/queue"
+	"github.com/walens/walens/internal/services/images"
 	"github.com/walens/walens/internal/services/jobs"
+	"github.com/walens/walens/internal/sources"
+	"github.com/walens/walens/internal/storage"
 )
 
 // Runner consumes jobs from the queue and processes them.
 type Runner struct {
-	logger  *slog.Logger
-	queue   *queue.Queue
-	jobsSvc *jobs.Service
-	mu      sync.RWMutex
-	ctx     context.Context
-	cancel  context.CancelFunc
-	wg      sync.WaitGroup
+	logger         *slog.Logger
+	queue          *queue.Queue
+	jobsSvc        *jobs.Service
+	storageSvc     *storage.Service
+	imageSvc       *images.Service
+	sourceRegistry *sources.Registry
+	materializer   *Materializer
+	mu             sync.RWMutex
+	ctx            context.Context
+	cancel         context.CancelFunc
+	wg             sync.WaitGroup
 }
 
 // New creates a new job runner. Queue must be set before Start.
@@ -42,6 +51,56 @@ func (r *Runner) SetJobsService(svc *jobs.Service) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.jobsSvc = svc
+	if r.materializer != nil {
+		r.materializer.SetJobsService(svc)
+	}
+}
+
+// SetStorageService sets the storage service for file operations.
+func (r *Runner) SetStorageService(svc *storage.Service) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.storageSvc = svc
+	if r.materializer != nil {
+		r.materializer.SetStorageService(svc)
+	}
+}
+
+// SetImageService sets the image service for image CRUD operations.
+func (r *Runner) SetImageService(svc *images.Service) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.imageSvc = svc
+	if r.materializer != nil {
+		r.materializer.SetImageService(svc)
+	}
+}
+
+// SetSourceRegistry sets the source registry for source lookups.
+func (r *Runner) SetSourceRegistry(reg *sources.Registry) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.sourceRegistry = reg
+}
+
+// getMaterializer returns the materializer, initializing it if needed.
+func (r *Runner) getMaterializer() *Materializer {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if r.materializer == nil {
+		r.materializer = NewMaterializer(r.logger)
+		if r.storageSvc != nil {
+			r.materializer.SetStorageService(r.storageSvc)
+		}
+		if r.imageSvc != nil {
+			r.materializer.SetImageService(r.imageSvc)
+		}
+		if r.jobsSvc != nil {
+			r.materializer.SetJobsService(r.jobsSvc)
+		}
+	}
+	return r.materializer
 }
 
 // Start begins the runner worker goroutine that consumes jobs from the queue.
@@ -128,9 +187,20 @@ func (r *Runner) ProcessJob(ctx context.Context, jobID string) error {
 		"job_id", jobID,
 		"source_id", job.SourceID)
 
-	// TODO: Actual job work - fetch, download, materialize
-	// Placeholder: simulate work
-	time.Sleep(100 * time.Millisecond)
+	// For source_sync jobs, fetch and materialize images
+	if job.JobType == jobs.JobTypeSourceSync && job.SourceID != nil {
+		if err := r.processSourceSyncJob(ctx, job); err != nil {
+			errMsg := err.Error()
+			_, failErr := r.jobsSvc.FailJob(ctx, jobs.FailJobRequest{
+				ID:           jobUUID,
+				ErrorMessage: errMsg,
+			})
+			if failErr != nil {
+				r.logger.Error("failed to mark job as failed", "error", failErr)
+			}
+			return fmt.Errorf("source sync job failed: %w", err)
+		}
+	}
 
 	// Complete the job
 	msg := "Job completed successfully"
@@ -143,6 +213,86 @@ func (r *Runner) ProcessJob(ctx context.Context, jobID string) error {
 	}
 
 	r.logger.Info("job completed", "job_id", jobID)
+	return nil
+}
+
+// processSourceSyncJob handles the actual source fetch and image materialization.
+func (r *Runner) processSourceSyncJob(ctx context.Context, job *model.Jobs) error {
+	if r.sourceRegistry == nil {
+		return fmt.Errorf("source registry not set")
+	}
+	if r.storageSvc == nil {
+		return fmt.Errorf("storage service not set")
+	}
+	if r.imageSvc == nil {
+		return fmt.Errorf("image service not set")
+	}
+
+	sourceID := *job.SourceID
+
+	// Get source type from job or database
+	sourceType := ""
+	if job.SourceType != nil {
+		sourceType = *job.SourceType
+	}
+
+	if sourceType == "" {
+		return fmt.Errorf("source type is empty")
+	}
+
+	// Get source from registry
+	src := r.sourceRegistry.Get(sourceType)
+	if src == nil {
+		return fmt.Errorf("unknown source type: %s", sourceType)
+	}
+
+	// Get subscribed devices
+	devices, err := r.imageSvc.GetSubscribedDevices(ctx, sourceID)
+	if err != nil {
+		if errors.Is(err, images.ErrNoSubscribedDevices) {
+			r.logger.Info("no subscribed devices for source", "source_id", sourceID)
+			return nil
+		}
+		return fmt.Errorf("get subscribed devices: %w", err)
+	}
+
+	// Get source params from job input
+	var sourceParams []byte
+	if job.JSONInput != nil {
+		sourceParams = []byte(job.JSONInput)
+	}
+
+	// Use default lookup count if not specified
+	lookupCount := src.DefaultLookupCount()
+	if job.RequestedImageCount > 0 {
+		lookupCount = int(job.RequestedImageCount)
+	}
+
+	// Create materialize request
+	matReq := MaterializeRequest{
+		JobID:        *job.ID,
+		SourceID:     sourceID,
+		SourceType:   sourceType,
+		SourceParams: sourceParams,
+		LookupCount:  lookupCount,
+		Devices:      devices,
+	}
+
+	// Materialize images
+	materializer := r.getMaterializer()
+	result, err := materializer.MaterializeImage(ctx, matReq, src)
+	if err != nil {
+		return fmt.Errorf("materialize images: %w", err)
+	}
+
+	r.logger.Info("source sync job completed",
+		"job_id", job.ID,
+		"downloaded", result.DownloadedCount,
+		"hardlinked", result.HardlinkedCount,
+		"copied", result.CopiedCount,
+		"skipped", result.SkippedCount,
+		"stored", result.StoredCount)
+
 	return nil
 }
 
