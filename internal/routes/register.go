@@ -180,4 +180,20 @@ func RegisterImagesRoutes(api huma.API, basePath string, db *sql.DB) {
 	huma.Register(api, imagesroutes.ListDeviceImagesOperation(basePath), func(ctx context.Context, input *imagesroutes.ListDeviceImagesInput) (*imagesroutes.ListDeviceImagesOutput, error) {
 		return imagesroutes.ListDeviceImages(ctx, input, imagesService)
 	})
+
+	huma.Register(api, imagesroutes.GetImageOperation(basePath), func(ctx context.Context, input *imagesroutes.GetImageInput) (*imagesroutes.GetImageOutput, error) {
+		return imagesroutes.GetImage(ctx, input, imagesService)
+	})
+
+	huma.Register(api, imagesroutes.SetImageFavoriteOperation(basePath), func(ctx context.Context, input *imagesroutes.SetImageFavoriteInput) (*imagesroutes.SetImageFavoriteOutput, error) {
+		return imagesroutes.SetImageFavorite(ctx, input, imagesService)
+	})
+
+	huma.Register(api, imagesroutes.BlacklistImageOperation(basePath), func(ctx context.Context, input *imagesroutes.BlacklistImageInput) (*imagesroutes.BlacklistImageOutput, error) {
+		return imagesroutes.BlacklistImage(ctx, input, imagesService)
+	})
+
+	huma.Register(api, imagesroutes.DeleteImageOperation(basePath), func(ctx context.Context, input *imagesroutes.DeleteImageInput) (*imagesroutes.DeleteImageOutput, error) {
+		return imagesroutes.DeleteImage(ctx, input, imagesService)
+	})
 }

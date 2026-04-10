@@ -17,6 +17,7 @@ var (
 	ErrThumbnailNotFound   = errors.New("image thumbnail not found")
 	ErrDeviceNotFound      = errors.New("device not found")
 	ErrNoSubscribedDevices = errors.New("no subscribed devices found")
+	ErrBlacklistNotFound   = errors.New("blacklist entry not found")
 )
 
 type Service struct{ db *sql.DB }
