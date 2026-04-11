@@ -23,9 +23,6 @@ type Runner struct {
 	logger         *slog.Logger
 	queue          *queue.Queue
 	jobsSvc        *jobs.Service
-	storageSvc     *storage.Service
-	imageSvc       *images.Service
-	tagsSvc        *tags.Service
 	sourceRegistry *sources.Registry
 	materializer   *Materializer
 	mu             sync.RWMutex
@@ -34,88 +31,52 @@ type Runner struct {
 	wg             sync.WaitGroup
 }
 
-// New creates a new job runner. Queue must be set before Start.
-func New(logger *slog.Logger) *Runner {
+type RunnerDependencies struct {
+	Logger         *slog.Logger
+	Queue          *queue.Queue
+	JobsService    *jobs.Service
+	StorageService *storage.Service
+	ImageService   *images.Service
+	TagsService    *tags.Service
+	SourceRegistry *sources.Registry
+}
+
+// New creates a new job runner.
+func New(deps RunnerDependencies) *Runner {
+	if deps.Logger == nil {
+		panic("runner.New: Logger is required")
+	}
+	if deps.Queue == nil {
+		panic("runner.New: Queue is required")
+	}
+	if deps.JobsService == nil {
+		panic("runner.New: JobsService is required")
+	}
+	if deps.StorageService == nil {
+		panic("runner.New: StorageService is required")
+	}
+	if deps.ImageService == nil {
+		panic("runner.New: ImageService is required")
+	}
+	if deps.TagsService == nil {
+		panic("runner.New: TagsService is required")
+	}
+	if deps.SourceRegistry == nil {
+		panic("runner.New: SourceRegistry is required")
+	}
 	return &Runner{
-		logger: logger,
+		logger:         deps.Logger,
+		queue:          deps.Queue,
+		jobsSvc:        deps.JobsService,
+		sourceRegistry: deps.SourceRegistry,
+		materializer: NewMaterializer(MaterializerDependencies{
+			Logger:         deps.Logger,
+			StorageService: deps.StorageService,
+			ImageService:   deps.ImageService,
+			JobsService:    deps.JobsService,
+			TagsService:    deps.TagsService,
+		}),
 	}
-}
-
-// SetQueue sets the queue for the runner to consume from.
-func (r *Runner) SetQueue(q *queue.Queue) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.queue = q
-}
-
-// SetJobsService sets the jobs service for job state management.
-func (r *Runner) SetJobsService(svc *jobs.Service) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.jobsSvc = svc
-	if r.materializer != nil {
-		r.materializer.SetJobsService(svc)
-	}
-}
-
-// SetStorageService sets the storage service for file operations.
-func (r *Runner) SetStorageService(svc *storage.Service) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.storageSvc = svc
-	if r.materializer != nil {
-		r.materializer.SetStorageService(svc)
-	}
-}
-
-// SetImageService sets the image service for image CRUD operations.
-func (r *Runner) SetImageService(svc *images.Service) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.imageSvc = svc
-	if r.materializer != nil {
-		r.materializer.SetImageService(svc)
-	}
-}
-
-// SetTagsService sets the tags service for tag operations.
-func (r *Runner) SetTagsService(svc *tags.Service) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.tagsSvc = svc
-	if r.materializer != nil {
-		r.materializer.SetTagsService(svc)
-	}
-}
-
-// SetSourceRegistry sets the source registry for source lookups.
-func (r *Runner) SetSourceRegistry(reg *sources.Registry) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.sourceRegistry = reg
-}
-
-// getMaterializer returns the materializer, initializing it if needed.
-func (r *Runner) getMaterializer() *Materializer {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	if r.materializer == nil {
-		r.materializer = NewMaterializer(r.logger)
-		if r.storageSvc != nil {
-			r.materializer.SetStorageService(r.storageSvc)
-		}
-		if r.imageSvc != nil {
-			r.materializer.SetImageService(r.imageSvc)
-		}
-		if r.jobsSvc != nil {
-			r.materializer.SetJobsService(r.jobsSvc)
-		}
-		if r.tagsSvc != nil {
-			r.materializer.SetTagsService(r.tagsSvc)
-		}
-	}
-	return r.materializer
 }
 
 // Start begins the runner worker goroutine that consumes jobs from the queue.
@@ -127,11 +88,6 @@ func (r *Runner) Start(ctx context.Context) error {
 		r.mu.Unlock()
 		r.logger.Warn("runner already started")
 		return nil
-	}
-	if r.queue == nil {
-		r.mu.Unlock()
-		r.logger.Error("runner started without a queue")
-		return fmt.Errorf("runner requires a queue")
 	}
 	r.ctx, r.cancel = context.WithCancel(ctx)
 	r.mu.Unlock()
@@ -173,10 +129,6 @@ func (r *Runner) run() {
 // and no actual work is performed.
 func (r *Runner) ProcessJob(ctx context.Context, jobID string) error {
 	r.logger.Info("processing job", "job_id", jobID)
-
-	if r.jobsSvc == nil {
-		return fmt.Errorf("jobs service not set")
-	}
 
 	// Parse job ID
 	jobUUID, err := dbtypes.NewUUIDFromString(jobID)
@@ -233,16 +185,6 @@ func (r *Runner) ProcessJob(ctx context.Context, jobID string) error {
 
 // processSourceSyncJob handles the actual source fetch and image materialization.
 func (r *Runner) processSourceSyncJob(ctx context.Context, job *model.Jobs) error {
-	if r.sourceRegistry == nil {
-		return fmt.Errorf("source registry not set")
-	}
-	if r.storageSvc == nil {
-		return fmt.Errorf("storage service not set")
-	}
-	if r.imageSvc == nil {
-		return fmt.Errorf("image service not set")
-	}
-
 	sourceID := *job.SourceID
 
 	// Get source type from job or database
@@ -262,7 +204,7 @@ func (r *Runner) processSourceSyncJob(ctx context.Context, job *model.Jobs) erro
 	}
 
 	// Get subscribed devices
-	devices, err := r.imageSvc.GetSubscribedDevices(ctx, sourceID)
+	devices, err := r.materializer.imageSvc.GetSubscribedDevices(ctx, sourceID)
 	if err != nil {
 		if errors.Is(err, images.ErrNoSubscribedDevices) {
 			r.logger.Info("no subscribed devices for source", "source_id", sourceID)
@@ -294,8 +236,7 @@ func (r *Runner) processSourceSyncJob(ctx context.Context, job *model.Jobs) erro
 	}
 
 	// Materialize images
-	materializer := r.getMaterializer()
-	result, err := materializer.MaterializeImage(ctx, matReq, src)
+	result, err := r.materializer.MaterializeImage(ctx, matReq, src)
 	if err != nil {
 		return fmt.Errorf("materialize images: %w", err)
 	}

@@ -27,18 +27,25 @@ type Service struct {
 	scheduler SchedulerInterface
 }
 
+type ServiceDependencies struct {
+	DB        *sql.DB
+	Registry  *appsources.Registry
+	Scheduler SchedulerInterface
+}
+
 // SchedulerInterface defines the interface for scheduler reload
 type SchedulerInterface interface {
 	Reload() error
 }
 
-func NewService(db *sql.DB, registry *appsources.Registry) *Service {
-	return &Service{db: db, registry: registry}
-}
-
-// SetScheduler sets the scheduler for reload triggers.
-func (s *Service) SetScheduler(scheduler SchedulerInterface) {
-	s.scheduler = scheduler
+func NewService(deps ServiceDependencies) *Service {
+	if deps.DB == nil {
+		panic("sources.NewService: DB is required")
+	}
+	if deps.Registry == nil {
+		panic("sources.NewService: Registry is required")
+	}
+	return &Service{db: deps.DB, registry: deps.Registry, scheduler: deps.Scheduler}
 }
 
 func (s *Service) validateSourceType(sourceType string, params json.RawMessage) error {

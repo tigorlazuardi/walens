@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"database/sql"
 	"encoding/base64"
 	"encoding/json"
@@ -15,19 +16,49 @@ import (
 	"github.com/walens/walens/internal/auth"
 	"github.com/walens/walens/internal/config"
 	"github.com/walens/walens/internal/db"
+	"github.com/walens/walens/internal/frontend"
 	"github.com/walens/walens/internal/queue"
 	"github.com/walens/walens/internal/runner"
 	"github.com/walens/walens/internal/scheduler"
 	"github.com/walens/walens/internal/services/configs"
+	"github.com/walens/walens/internal/services/images"
+	"github.com/walens/walens/internal/services/jobs"
 	sourcesvc "github.com/walens/walens/internal/services/sources"
+	"github.com/walens/walens/internal/services/tags"
 	"github.com/walens/walens/internal/sources"
 	"github.com/walens/walens/internal/sources/booru"
 	"github.com/walens/walens/internal/sources/reddit"
+	"github.com/walens/walens/internal/storage"
 
 	_ "modernc.org/sqlite"
 )
 
 const testCookieSecret = "test-cookie-secret"
+
+func newTestScheduler(t *testing.T, db *sql.DB) *scheduler.Scheduler {
+	t.Helper()
+	return scheduler.New(scheduler.SchedulerDependencies{
+		Logger: slog.New(slog.DiscardHandler),
+		Loader: scheduleLoaderFunc(func(context.Context) ([]scheduler.SourceSchedule, error) {
+			return nil, nil
+		}),
+		JobsService: jobs.NewService(db),
+		EnqueueFunc: func(string) {},
+	})
+}
+
+func newTestRunner(t *testing.T, db *sql.DB) *runner.Runner {
+	t.Helper()
+	return runner.New(runner.RunnerDependencies{
+		Logger:         slog.New(slog.DiscardHandler),
+		Queue:          queue.New(slog.New(slog.DiscardHandler)),
+		JobsService:    jobs.NewService(db),
+		StorageService: storage.NewService(storage.Config{BaseDir: t.TempDir()}),
+		ImageService:   images.NewService(db),
+		TagsService:    tags.NewService(db),
+		SourceRegistry: newSourceRegistry(),
+	})
+}
 
 func TestAuthConfigValidation(t *testing.T) {
 	tests := []struct {
@@ -783,12 +814,11 @@ func TestInitDBAppliesPersistedConfig(t *testing.T) {
 		logger: slog.Default(),
 		db:     testDB,
 		queue:  queue.New(slog.Default()),
-		runner: runner.New(slog.Default()),
+		runner: newTestRunner(t, testDB),
 	}
 
 	// Set up a minimal scheduler for initDB
-	app.scheduler = scheduler.New(slog.Default())
-	app.runner.SetQueue(app.queue)
+	app.scheduler = newTestScheduler(t, testDB)
 
 	if err := app.initDB(); err != nil {
 		t.Fatalf("initDB failed: %v", err)
@@ -859,12 +889,11 @@ func TestInitDBInjectsDefaultsForEmptyRow(t *testing.T) {
 		logger: slog.Default(),
 		db:     testDB,
 		queue:  queue.New(slog.Default()),
-		runner: runner.New(slog.Default()),
+		runner: newTestRunner(t, testDB),
 	}
 
 	// Set up a minimal scheduler for initDB
-	app.scheduler = scheduler.New(slog.Default())
-	app.runner.SetQueue(app.queue)
+	app.scheduler = newTestScheduler(t, testDB)
 
 	if err := app.initDB(); err != nil {
 		t.Fatalf("initDB failed: %v", err)
@@ -941,12 +970,11 @@ func TestInitDBPreservesAuthBootstrapOnly(t *testing.T) {
 		logger: slog.Default(),
 		db:     testDB,
 		queue:  queue.New(slog.Default()),
-		runner: runner.New(slog.Default()),
+		runner: newTestRunner(t, testDB),
 	}
 
 	// Set up a minimal scheduler for initDB
-	app.scheduler = scheduler.New(slog.Default())
-	app.runner.SetQueue(app.queue)
+	app.scheduler = newTestScheduler(t, testDB)
 
 	if err := app.initDB(); err != nil {
 		t.Fatalf("initDB failed: %v", err)
@@ -1002,15 +1030,14 @@ func TestGetConfigRoute(t *testing.T) {
 		logger: slog.Default(),
 		db:     testDB,
 		queue:  queue.New(slog.Default()),
-		runner: runner.New(slog.Default()),
+		runner: newTestRunner(t, testDB),
 	}
 
 	// Initialize configService
 	app.configService = configs.NewService(app.db)
 
 	// Set up a minimal scheduler for initDB
-	app.scheduler = scheduler.New(slog.Default())
-	app.runner.SetQueue(app.queue)
+	app.scheduler = newTestScheduler(t, testDB)
 
 	handler := app.Handler()
 
@@ -1134,15 +1161,14 @@ func TestGetConfigRouteWithAuth(t *testing.T) {
 		logger: slog.Default(),
 		db:     testDB,
 		queue:  queue.New(slog.Default()),
-		runner: runner.New(slog.Default()),
+		runner: newTestRunner(t, testDB),
 	}
 
 	// Initialize configService
 	app.configService = configs.NewService(app.db)
 
 	// Set up a minimal scheduler for initDB
-	app.scheduler = scheduler.New(slog.Default())
-	app.runner.SetQueue(app.queue)
+	app.scheduler = newTestScheduler(t, testDB)
 
 	handler := app.Handler()
 
@@ -1215,15 +1241,14 @@ func TestConfigRouteWithBasePath(t *testing.T) {
 		logger: slog.Default(),
 		db:     testDB,
 		queue:  queue.New(slog.Default()),
-		runner: runner.New(slog.Default()),
+		runner: newTestRunner(t, testDB),
 	}
 
 	// Initialize configService
 	app.configService = configs.NewService(app.db)
 
 	// Set up a minimal scheduler for initDB
-	app.scheduler = scheduler.New(slog.Default())
-	app.runner.SetQueue(app.queue)
+	app.scheduler = newTestScheduler(t, testDB)
 
 	handler := app.Handler()
 
@@ -1303,15 +1328,14 @@ func TestSourceTypesRoutes(t *testing.T) {
 		logger: slog.Default(),
 		db:     testDB,
 		queue:  queue.New(slog.Default()),
-		runner: runner.New(slog.Default()),
+		runner: newTestRunner(t, testDB),
 	}
 
 	// Initialize configService
 	app.configService = configs.NewService(app.db)
 
 	// Set up a minimal scheduler for initDB
-	app.scheduler = scheduler.New(slog.Default())
-	app.runner.SetQueue(app.queue)
+	app.scheduler = newTestScheduler(t, testDB)
 
 	handler := app.Handler()
 
@@ -1452,15 +1476,14 @@ func TestSourceTypesRoutesWithAuth(t *testing.T) {
 		logger: slog.Default(),
 		db:     testDB,
 		queue:  queue.New(slog.Default()),
-		runner: runner.New(slog.Default()),
+		runner: newTestRunner(t, testDB),
 	}
 
 	// Initialize configService
 	app.configService = configs.NewService(app.db)
 
 	// Set up a minimal scheduler for initDB
-	app.scheduler = scheduler.New(slog.Default())
-	app.runner.SetQueue(app.queue)
+	app.scheduler = newTestScheduler(t, testDB)
 
 	handler := app.Handler()
 
@@ -1533,15 +1556,14 @@ func TestSourceTypesRoutesWithBasePath(t *testing.T) {
 		logger: slog.Default(),
 		db:     testDB,
 		queue:  queue.New(slog.Default()),
-		runner: runner.New(slog.Default()),
+		runner: newTestRunner(t, testDB),
 	}
 
 	// Initialize configService
 	app.configService = configs.NewService(app.db)
 
 	// Set up a minimal scheduler for initDB
-	app.scheduler = scheduler.New(slog.Default())
-	app.runner.SetQueue(app.queue)
+	app.scheduler = newTestScheduler(t, testDB)
 
 	handler := app.Handler()
 
@@ -1622,7 +1644,7 @@ func TestSourcesRoutes(t *testing.T) {
 		logger: slog.Default(),
 		db:     testDB,
 		queue:  queue.New(slog.Default()),
-		runner: runner.New(slog.Default()),
+		runner: newTestRunner(t, testDB),
 	}
 
 	// Initialize services
@@ -1631,11 +1653,10 @@ func TestSourcesRoutes(t *testing.T) {
 	app.sourceRegistry = sources.NewRegistry()
 	app.sourceRegistry.Register(booru.New())
 	app.sourceRegistry.Register(reddit.New())
-	app.sourcesService = sourcesvc.NewService(app.db, app.sourceRegistry)
+	app.sourcesService = sourcesvc.NewService(sourcesvc.ServiceDependencies{DB: app.db, Registry: newSourceRegistry()})
 
 	// Set up minimal scheduler
-	app.scheduler = scheduler.New(slog.Default())
-	app.runner.SetQueue(app.queue)
+	app.scheduler = newTestScheduler(t, testDB)
 
 	handler := app.Handler()
 
@@ -1806,16 +1827,15 @@ func TestSourcesRoutesWithAuth(t *testing.T) {
 		logger: slog.Default(),
 		db:     testDB,
 		queue:  queue.New(slog.Default()),
-		runner: runner.New(slog.Default()),
+		runner: newTestRunner(t, testDB),
 	}
 
 	// Initialize services
 	app.configService = configs.NewService(app.db)
-	app.sourcesService = sourcesvc.NewService(app.db, app.sourceRegistry)
+	app.sourcesService = sourcesvc.NewService(sourcesvc.ServiceDependencies{DB: app.db, Registry: newSourceRegistry()})
 
 	// Set up minimal scheduler
-	app.scheduler = scheduler.New(slog.Default())
-	app.runner.SetQueue(app.queue)
+	app.scheduler = newTestScheduler(t, testDB)
 
 	handler := app.Handler()
 
@@ -1888,7 +1908,7 @@ func TestSourcesRoutesWithBasePath(t *testing.T) {
 		logger: slog.Default(),
 		db:     testDB,
 		queue:  queue.New(slog.Default()),
-		runner: runner.New(slog.Default()),
+		runner: newTestRunner(t, testDB),
 	}
 
 	// Initialize services
@@ -1897,11 +1917,10 @@ func TestSourcesRoutesWithBasePath(t *testing.T) {
 	app.sourceRegistry = sources.NewRegistry()
 	app.sourceRegistry.Register(booru.New())
 	app.sourceRegistry.Register(reddit.New())
-	app.sourcesService = sourcesvc.NewService(app.db, app.sourceRegistry)
+	app.sourcesService = sourcesvc.NewService(sourcesvc.ServiceDependencies{DB: app.db, Registry: newSourceRegistry()})
 
 	// Set up minimal scheduler
-	app.scheduler = scheduler.New(slog.Default())
-	app.runner.SetQueue(app.queue)
+	app.scheduler = newTestScheduler(t, testDB)
 
 	handler := app.Handler()
 
@@ -1981,7 +2000,7 @@ func TestSourceSchedulesRoutes(t *testing.T) {
 		logger: slog.Default(),
 		db:     testDB,
 		queue:  queue.New(slog.Default()),
-		runner: runner.New(slog.Default()),
+		runner: newTestRunner(t, testDB),
 	}
 
 	// Initialize services
@@ -1989,9 +2008,8 @@ func TestSourceSchedulesRoutes(t *testing.T) {
 	app.sourceRegistry = sources.NewRegistry()
 	app.sourceRegistry.Register(booru.New())
 	app.sourceRegistry.Register(reddit.New())
-	app.sourcesService = sourcesvc.NewService(app.db, app.sourceRegistry)
-	app.scheduler = scheduler.New(slog.Default())
-	app.runner.SetQueue(app.queue)
+	app.sourcesService = sourcesvc.NewService(sourcesvc.ServiceDependencies{DB: app.db, Registry: newSourceRegistry()})
+	app.scheduler = newTestScheduler(t, testDB)
 
 	handler := app.Handler()
 
@@ -2228,15 +2246,14 @@ func TestSourceSchedulesRoutesWithAuth(t *testing.T) {
 		logger: slog.Default(),
 		db:     testDB,
 		queue:  queue.New(slog.Default()),
-		runner: runner.New(slog.Default()),
+		runner: newTestRunner(t, testDB),
 	}
 
 	app.configService = configs.NewService(app.db)
 	app.sourceRegistry = sources.NewRegistry()
 	app.sourceRegistry.Register(booru.New())
-	app.sourcesService = sourcesvc.NewService(app.db, app.sourceRegistry)
-	app.scheduler = scheduler.New(slog.Default())
-	app.runner.SetQueue(app.queue)
+	app.sourcesService = sourcesvc.NewService(sourcesvc.ServiceDependencies{DB: app.db, Registry: newSourceRegistry()})
+	app.scheduler = newTestScheduler(t, testDB)
 
 	handler := app.Handler()
 
@@ -2306,16 +2323,15 @@ func TestSourceSchedulesRoutesWithBasePath(t *testing.T) {
 		logger: slog.Default(),
 		db:     testDB,
 		queue:  queue.New(slog.Default()),
-		runner: runner.New(slog.Default()),
+		runner: newTestRunner(t, testDB),
 	}
 
 	app.configService = configs.NewService(app.db)
 	app.sourceRegistry = sources.NewRegistry()
 	app.sourceRegistry.Register(booru.New())
 	app.sourceRegistry.Register(reddit.New())
-	app.sourcesService = sourcesvc.NewService(app.db, app.sourceRegistry)
-	app.scheduler = scheduler.New(slog.Default())
-	app.runner.SetQueue(app.queue)
+	app.sourcesService = sourcesvc.NewService(sourcesvc.ServiceDependencies{DB: app.db, Registry: newSourceRegistry()})
+	app.scheduler = newTestScheduler(t, testDB)
 
 	handler := app.Handler()
 
@@ -2431,15 +2447,14 @@ func TestSPAFallbackWithBasePath(t *testing.T) {
 		logger: slog.Default(),
 		db:     testDB,
 		queue:  queue.New(slog.Default()),
-		runner: runner.New(slog.Default()),
+		runner: newTestRunner(t, testDB),
 	}
 
 	// Initialize configService
 	app.configService = configs.NewService(app.db)
 
 	// Set up minimal scheduler
-	app.scheduler = scheduler.New(slog.Default())
-	app.runner.SetQueue(app.queue)
+	app.scheduler = newTestScheduler(t, testDB)
 
 	handler := app.Handler()
 
@@ -2527,15 +2542,14 @@ func TestSPAFallbackRootPath(t *testing.T) {
 		logger: slog.Default(),
 		db:     testDB,
 		queue:  queue.New(slog.Default()),
-		runner: runner.New(slog.Default()),
+		runner: newTestRunner(t, testDB),
 	}
 
 	// Initialize configService
 	app.configService = configs.NewService(app.db)
 
 	// Set up minimal scheduler
-	app.scheduler = scheduler.New(slog.Default())
-	app.runner.SetQueue(app.queue)
+	app.scheduler = newTestScheduler(t, testDB)
 
 	handler := app.Handler()
 
@@ -2577,9 +2591,9 @@ func TestSPABasePathInjection(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
-			result := escapeForJS(tt.input)
+			result := frontend.EscapeForJS(tt.input)
 			if result != tt.expected {
-				t.Errorf("escapeForJS(%q) = %q, want %q", tt.input, result, tt.expected)
+				t.Errorf("EscapeForJS(%q) = %q, want %q", tt.input, result, tt.expected)
 			}
 		})
 	}
@@ -2605,7 +2619,7 @@ func TestIsAssetPath(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.path, func(t *testing.T) {
-			result := IsAssetPath(tt.path)
+			result := frontend.IsAssetPath(tt.path)
 			if result != tt.expected {
 				t.Errorf("IsAssetPath(%q) = %v, want %v", tt.path, result, tt.expected)
 			}
@@ -2831,7 +2845,7 @@ export const foo = 42;`
 	}
 
 	// Create SPA handler in production mode to test static asset serving
-	spa, err := NewSPAHandler("/walens", "http://localhost:5173", false, os.DirFS(distDir))
+	spa, err := frontend.NewSPAHandler("/walens", "http://localhost:5173", false, os.DirFS(distDir))
 	if err != nil {
 		t.Fatalf("NewSPAHandler failed: %v", err)
 	}
@@ -2952,12 +2966,11 @@ func TestSPAWithBasePathAndHealth(t *testing.T) {
 		logger: slog.Default(),
 		db:     testDB,
 		queue:  queue.New(slog.Default()),
-		runner: runner.New(slog.Default()),
+		runner: newTestRunner(t, testDB),
 	}
 
 	app.configService = configs.NewService(app.db)
-	app.scheduler = scheduler.New(slog.Default())
-	app.runner.SetQueue(app.queue)
+	app.scheduler = newTestScheduler(t, testDB)
 
 	handler := app.Handler()
 
@@ -3008,7 +3021,7 @@ func TestSPAWithBasePathAndHealth(t *testing.T) {
 // TestDevModeSPAHandler tests the SPA handler in dev mode.
 func TestDevModeSPAHandler(t *testing.T) {
 	// In dev mode, we don't need a real FS
-	spa, err := NewSPAHandler("/walens", "http://localhost:5173", true, nil)
+	spa, err := frontend.NewSPAHandler("/walens", "http://localhost:5173", true, nil)
 	if err != nil {
 		t.Fatalf("NewSPAHandler failed: %v", err)
 	}
@@ -3097,12 +3110,11 @@ func TestSPAHandlerAtRoot(t *testing.T) {
 		logger: slog.Default(),
 		db:     testDB,
 		queue:  queue.New(slog.Default()),
-		runner: runner.New(slog.Default()),
+		runner: newTestRunner(t, testDB),
 	}
 
 	app.configService = configs.NewService(app.db)
-	app.scheduler = scheduler.New(slog.Default())
-	app.runner.SetQueue(app.queue)
+	app.scheduler = newTestScheduler(t, testDB)
 
 	handler := app.Handler()
 

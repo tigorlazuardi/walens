@@ -14,7 +14,6 @@ import (
 	schedulesroutes "github.com/walens/walens/internal/routes/source_schedules"
 	sourcetypesroutes "github.com/walens/walens/internal/routes/source_types"
 	sourceroutes "github.com/walens/walens/internal/routes/sources"
-	"github.com/walens/walens/internal/scheduler"
 	configssvc "github.com/walens/walens/internal/services/configs"
 	devsubsvc "github.com/walens/walens/internal/services/device_subscriptions"
 	devicessvc "github.com/walens/walens/internal/services/devices"
@@ -57,7 +56,7 @@ func RegisterSourceTypesRoutes(api huma.API, basePath string, registry *sources.
 // RegisterSourcesRoutes registers all sources RPC routes under /api/v1/sources/.
 func RegisterSourcesRoutes(api huma.API, basePath string, dbSourcesService *sourcessvc.Service) {
 	if dbSourcesService == nil {
-		dbSourcesService = sourcessvc.NewService(nil, nil)
+		dbSourcesService = &sourcessvc.Service{}
 	}
 
 	huma.Register(api, sourceroutes.ListSourcesOperation(basePath), func(ctx context.Context, input *sourceroutes.ListSourcesInput) (*sourceroutes.ListSourcesOutput, error) {
@@ -82,11 +81,8 @@ func RegisterSourcesRoutes(api huma.API, basePath string, dbSourcesService *sour
 }
 
 // RegisterSourceSchedulesRoutes registers all source_schedules RPC routes under /api/v1/source_schedules/.
-func RegisterSourceSchedulesRoutes(api huma.API, basePath string, db *sql.DB, sc *scheduler.Scheduler) {
-	var schedService *schedulessvc.Service
-	if db != nil {
-		schedService = schedulessvc.NewService(db, sc)
-	} else {
+func RegisterSourceSchedulesRoutes(api huma.API, basePath string, schedService *schedulessvc.Service) {
+	if schedService == nil {
 		schedService = schedulessvc.NewService(nil, nil)
 	}
 

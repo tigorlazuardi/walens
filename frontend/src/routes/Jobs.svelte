@@ -1,29 +1,25 @@
 <script lang="ts">
   import { useJobs } from '../lib/api/queries';
-  import type { JobStatus, JobType, TriggerKind } from '../lib/api/types';
+  import type { JobStatus, JobType } from '../lib/api/types';
+  import { Badge, Button, Card, Select } from '../lib/components/ui';
 
   const jobsQuery = useJobs(() => ({}));
 
   let filterStatus = $state<JobStatus | ''>('');
   let filterType = $state<JobType | ''>('');
 
-  function statusClass(status: JobStatus): string {
+  function statusVariant(status: JobStatus) {
     switch (status) {
-      case 'queued': return 'badge blue';
-      case 'running': return 'badge yellow';
-      case 'succeeded': return 'badge green';
-      case 'failed': return 'badge red';
-      case 'cancelled': return 'badge gray';
-      default: return 'badge gray';
+      case 'queued': return 'secondary';
+      case 'running': return 'warning';
+      case 'succeeded': return 'success';
+      case 'failed': return 'destructive';
+      default: return 'outline';
     }
   }
 
   function formatDate(dateStr: string): string {
-    try {
-      return new Date(dateStr).toLocaleString();
-    } catch {
-      return dateStr;
-    }
+    try { return new Date(dateStr).toLocaleString(); } catch { return dateStr; }
   }
 
   function formatDuration(ms: number): string {
@@ -31,238 +27,73 @@
     if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
     return `${(ms / 60000).toFixed(1)}m`;
   }
+
+  let filteredJobs = $derived((jobsQuery.data?.items ?? []).filter((job) => {
+    if (filterStatus && job.status !== filterStatus) return false;
+    if (filterType && job.job_type !== filterType) return false;
+    return true;
+  }));
 </script>
 
-<div class="page">
-  <div class="page-header">
-    <h1>Jobs</h1>
-    <button class="refresh-btn" onclick={() => jobsQuery.refetch()}>Refresh</button>
+<div class="space-y-4">
+  <div class="flex flex-wrap items-center justify-between gap-3">
+    <h1 class="text-2xl font-semibold tracking-tight">Jobs</h1>
+    <Button variant="outline" onclick={() => jobsQuery.refetch()}>Refresh</Button>
   </div>
 
-  <div class="filters">
-    <select bind:value={filterStatus}>
+  <div class="flex flex-wrap gap-3">
+    <Select class="w-44" bind:value={filterStatus}>
       <option value="">All Statuses</option>
       <option value="queued">Queued</option>
       <option value="running">Running</option>
       <option value="succeeded">Succeeded</option>
       <option value="failed">Failed</option>
       <option value="cancelled">Cancelled</option>
-    </select>
-    <select bind:value={filterType}>
+    </Select>
+    <Select class="w-44" bind:value={filterType}>
       <option value="">All Types</option>
       <option value="source_sync">Source Sync</option>
       <option value="source_download">Source Download</option>
-    </select>
+    </Select>
   </div>
 
   {#if jobsQuery.isLoading}
-    <p>Loading...</p>
+    <p class="text-slate-500">Loading...</p>
   {:else if jobsQuery.isError}
-    <p class="error">Failed to load jobs</p>
+    <p class="text-rose-600">Failed to load jobs</p>
   {:else if jobsQuery.data}
-    <div class="job-list">
-      {#each jobsQuery.data.items as job}
-        <div class="job-card" class:failed={job.status === 'failed'}>
-          <div class="job-header">
-            <span class="job-type">{job.job_type.replace('_', ' ')}</span>
-            <span class={statusClass(job.status)}>{job.status}</span>
+    <div class="grid gap-4">
+      {#each filteredJobs as job}
+        <Card class={job.status === 'failed' ? 'border-rose-300 p-4' : 'p-4'}>
+          <div class="flex items-start justify-between gap-3">
+            <div>
+              <p class="font-semibold capitalize">{job.job_type.replace('_', ' ')}</p>
+              {#if job.source_name}<p class="text-sm text-slate-500">Source: {job.source_name}</p>{/if}
+            </div>
+            <Badge variant={statusVariant(job.status)}>{job.status}</Badge>
           </div>
-          <div class="job-info">
-            {#if job.source_name}
-              <p class="source-name">Source: {job.source_name}</p>
-            {/if}
-            <p class="trigger">Trigger: {job.trigger_kind}</p>
-            <p class="time">Created: {formatDate(job.created_at)}</p>
-            {#if job.started_at}
-              <p class="time">Started: {formatDate(job.started_at)}</p>
-            {/if}
-            {#if job.finished_at}
-              <p class="time">Finished: {formatDate(job.finished_at)} ({formatDuration(job.duration_ms || 0)})</p>
-            {/if}
+
+          <div class="mt-4 grid gap-2 text-sm text-slate-600 sm:grid-cols-2 lg:grid-cols-4">
+            <p>Trigger: {job.trigger_kind}</p>
+            <p>Created: {formatDate(job.created_at)}</p>
+            {#if job.started_at}<p>Started: {formatDate(job.started_at)}</p>{/if}
+            {#if job.finished_at}<p>Finished: {formatDate(job.finished_at)} ({formatDuration(job.duration_ms || 0)})</p>{/if}
           </div>
-          <div class="job-stats">
-            <div class="stat">
-              <span class="stat-value">{job.requested_image_count}</span>
-              <span class="stat-label">Requested</span>
-            </div>
-            <div class="stat">
-              <span class="stat-value">{job.downloaded_image_count}</span>
-              <span class="stat-label">Downloaded</span>
-            </div>
-            <div class="stat">
-              <span class="stat-value">{job.stored_image_count}</span>
-              <span class="stat-label">Stored</span>
-            </div>
-            <div class="stat">
-              <span class="stat-value">{job.skipped_image_count}</span>
-              <span class="stat-label">Skipped</span>
-            </div>
+
+          <div class="mt-4 grid grid-cols-4 gap-3 text-center text-sm">
+            <div><div class="text-lg font-semibold">{job.requested_image_count}</div><div class="text-xs text-slate-500">Requested</div></div>
+            <div><div class="text-lg font-semibold">{job.downloaded_image_count}</div><div class="text-xs text-slate-500">Downloaded</div></div>
+            <div><div class="text-lg font-semibold">{job.stored_image_count}</div><div class="text-xs text-slate-500">Stored</div></div>
+            <div><div class="text-lg font-semibold">{job.skipped_image_count}</div><div class="text-xs text-slate-500">Skipped</div></div>
           </div>
+
           {#if job.error_message}
-            <p class="error-message">{job.error_message}</p>
+            <p class="mt-4 rounded-md border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">{job.error_message}</p>
           {/if}
-        </div>
+        </Card>
       {:else}
-        <p class="empty">No jobs found.</p>
+        <p class="py-10 text-center text-sm italic text-slate-500">No jobs found.</p>
       {/each}
     </div>
   {/if}
 </div>
-
-<style>
-  .page {
-    padding: 1rem;
-  }
-
-  .page-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 1rem;
-  }
-
-  h1 {
-    margin: 0;
-    font-size: 1.5rem;
-  }
-
-  .filters {
-    display: flex;
-    gap: 0.5rem;
-    margin-bottom: 1rem;
-  }
-
-  .filters select {
-    padding: 0.5rem;
-    border: 1px solid #ddd;
-    border-radius: 4px;
-    font-size: 0.9rem;
-  }
-
-  .refresh-btn {
-    background: #f5f5f5;
-    border: 1px solid #ddd;
-    padding: 0.5rem 1rem;
-    border-radius: 4px;
-    cursor: pointer;
-    font-size: 0.9rem;
-  }
-
-  .refresh-btn:hover {
-    background: #e8e8e8;
-  }
-
-  .job-list {
-    display: flex;
-    flex-direction: column;
-    gap: 0.75rem;
-  }
-
-  .job-card {
-    background: white;
-    border-radius: 8px;
-    padding: 1rem;
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
-    border-left: 3px solid #ccc;
-  }
-
-  .job-card.failed {
-    border-left-color: #c62828;
-  }
-
-  .job-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 0.5rem;
-  }
-
-  .job-type {
-    font-weight: 600;
-    text-transform: capitalize;
-  }
-
-  .badge {
-    font-size: 0.7rem;
-    padding: 0.125rem 0.5rem;
-    border-radius: 3px;
-    font-weight: 500;
-  }
-
-  .badge.blue {
-    background: #e3f2fd;
-    color: #1976d2;
-  }
-
-  .badge.yellow {
-    background: #fff8e1;
-    color: #f57c00;
-  }
-
-  .badge.green {
-    background: #e8f5e9;
-    color: #2e7d32;
-  }
-
-  .badge.red {
-    background: #ffebee;
-    color: #c62828;
-  }
-
-  .badge.gray {
-    background: #f5f5f5;
-    color: #666;
-  }
-
-  .job-info p {
-    margin: 0.2rem 0;
-    font-size: 0.85rem;
-    color: #666;
-  }
-
-  .job-stats {
-    display: flex;
-    gap: 1rem;
-    margin-top: 0.75rem;
-    padding-top: 0.75rem;
-    border-top: 1px solid #eee;
-  }
-
-  .stat {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-  }
-
-  .stat-value {
-    font-size: 1.1rem;
-    font-weight: 600;
-    color: #333;
-  }
-
-  .stat-label {
-    font-size: 0.7rem;
-    color: #888;
-    text-transform: uppercase;
-  }
-
-  .error-message {
-    margin-top: 0.5rem;
-    padding: 0.5rem;
-    background: #ffebee;
-    border-radius: 4px;
-    color: #c62828;
-    font-size: 0.85rem;
-  }
-
-  .empty {
-    color: #888;
-    font-style: italic;
-    text-align: center;
-    padding: 2rem;
-  }
-
-  .error {
-    color: #c33;
-  }
-</style>

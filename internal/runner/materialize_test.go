@@ -17,6 +17,7 @@ import (
 	"github.com/walens/walens/internal/db/generated/model"
 	"github.com/walens/walens/internal/dbtypes"
 	"github.com/walens/walens/internal/services/images"
+	"github.com/walens/walens/internal/services/jobs"
 	"github.com/walens/walens/internal/services/tags"
 	"github.com/walens/walens/internal/sources"
 	"github.com/walens/walens/internal/storage"
@@ -293,6 +294,17 @@ func newTestStorage(t *testing.T) *testStorage {
 	return &testStorage{Service: svc, tempDir: tempDir}
 }
 
+func newTestMaterializer(t *testing.T, db *sql.DB, storageSvc *storage.Service) *Materializer {
+	t.Helper()
+	return NewMaterializer(MaterializerDependencies{
+		Logger:         slog.New(slog.DiscardHandler),
+		StorageService: storageSvc,
+		ImageService:   images.NewService(db),
+		JobsService:    jobs.NewService(db),
+		TagsService:    tags.NewService(db),
+	})
+}
+
 func (ts *testStorage) cleanup() {
 	os.RemoveAll(ts.tempDir)
 }
@@ -338,9 +350,7 @@ func TestRule1_AssignedAndFileExists_Skip(t *testing.T) {
 	insertTestImageLocation(t, db, locationID.UUID.String(), imageID.UUID.String(), deviceID.UUID.String(), existingPath, StorageKindCanonical, true)
 
 	// Setup materializer with a discard logger
-	mat := NewMaterializer(slog.New(slog.DiscardHandler))
-	mat.SetStorageService(ts.Service)
-	mat.SetImageService(images.NewService(db))
+	mat := newTestMaterializer(t, db, ts.Service)
 
 	// Create source that yields one image
 	src := &mockSource{
@@ -408,9 +418,7 @@ func TestRule3_AssignedToAnotherDevice_HardLinkOrCopy(t *testing.T) {
 	insertTestImageLocation(t, db, locationAID.UUID.String(), imageID.UUID.String(), deviceAID.UUID.String(), existingPath, StorageKindCanonical, true)
 
 	// Setup materializer with a discard logger
-	mat := NewMaterializer(slog.New(slog.DiscardHandler))
-	mat.SetStorageService(ts.Service)
-	mat.SetImageService(images.NewService(db))
+	mat := newTestMaterializer(t, db, ts.Service)
 
 	// Create source that yields one image
 	src := &mockSource{
@@ -465,9 +473,7 @@ func TestBlacklist_SkipsBlacklistedImage(t *testing.T) {
 	insertTestBlacklistEntry(t, db, blacklistID.UUID.String(), sourceID.UUID.String(), "blacklisted-img")
 
 	// Setup materializer with a discard logger
-	mat := NewMaterializer(slog.New(slog.DiscardHandler))
-	mat.SetStorageService(ts.Service)
-	mat.SetImageService(images.NewService(db))
+	mat := newTestMaterializer(t, db, ts.Service)
 
 	// Create source that yields the blacklisted image
 	src := &mockSource{
@@ -512,9 +518,7 @@ func TestNoDevices_NoPanic(t *testing.T) {
 	insertTestSource(t, db, sourceID.UUID.String(), "test-source")
 
 	// Setup materializer with a discard logger
-	mat := NewMaterializer(slog.New(slog.DiscardHandler))
-	mat.SetStorageService(ts.Service)
-	mat.SetImageService(images.NewService(db))
+	mat := newTestMaterializer(t, db, ts.Service)
 
 	src := &mockSource{
 		items: []sources.ImageMetadata{
@@ -578,9 +582,7 @@ func TestRule4_AssignedElsewhereSourceMissing_DownloadForCurrentDevice(t *testin
 	// Note: We do NOT create the file - it should be "missing"
 
 	// Setup materializer with a discard logger
-	mat := NewMaterializer(slog.New(slog.DiscardHandler))
-	mat.SetStorageService(ts.Service)
-	mat.SetImageService(images.NewService(db))
+	mat := newTestMaterializer(t, db, ts.Service)
 
 	src := &mockSource{
 		items: []sources.ImageMetadata{
@@ -635,9 +637,7 @@ func TestMultipleImages_MultipleDevices(t *testing.T) {
 	insertTestSource(t, db, sourceID.UUID.String(), "test-source")
 
 	// Setup materializer with a discard logger
-	mat := NewMaterializer(slog.New(slog.DiscardHandler))
-	mat.SetStorageService(ts.Service)
-	mat.SetImageService(images.NewService(db))
+	mat := newTestMaterializer(t, db, ts.Service)
 
 	// Three images: one blacklisted, two regular
 	src := &mockSource{
@@ -690,9 +690,7 @@ func TestMaterializeResult_Counters(t *testing.T) {
 	insertTestSource(t, db, sourceID.UUID.String(), "test-source")
 
 	// Setup materializer with a discard logger
-	mat := NewMaterializer(slog.New(slog.DiscardHandler))
-	mat.SetStorageService(ts.Service)
-	mat.SetImageService(images.NewService(db))
+	mat := newTestMaterializer(t, db, ts.Service)
 
 	// Two images: one assigned with file (skip), one not assigned
 	image1ID := dbtypes.MustNewUUIDV7()
@@ -778,9 +776,7 @@ func TestRule2_RedownloadWithExistingAssignment_NoDuplicateLocation(t *testing.T
 	// Note: We do NOT create the file - it should be "missing"
 
 	// Setup materializer with a discard logger
-	mat := NewMaterializer(slog.New(slog.DiscardHandler))
-	mat.SetStorageService(ts.Service)
-	mat.SetImageService(images.NewService(db))
+	mat := newTestMaterializer(t, db, ts.Service)
 
 	// Create source that yields one image - this should trigger Rule 2 (re-download)
 	src := &mockSource{
@@ -855,9 +851,7 @@ func TestCopyFallback_StorageKindIsCopy(t *testing.T) {
 	insertTestImageLocation(t, db, locationAID.UUID.String(), imageID.UUID.String(), deviceAID.UUID.String(), existingPath, StorageKindCanonical, true)
 
 	// Setup materializer with a discard logger
-	mat := NewMaterializer(slog.New(slog.DiscardHandler))
-	mat.SetStorageService(ts.Service)
-	mat.SetImageService(images.NewService(db))
+	mat := newTestMaterializer(t, db, ts.Service)
 
 	// Create source that yields one image
 	src := &mockSource{
@@ -929,9 +923,7 @@ func TestStoredCount_OnlyNewImages(t *testing.T) {
 	// We create a mock source that returns this image
 
 	// Setup materializer with a discard logger
-	mat := NewMaterializer(slog.New(slog.DiscardHandler))
-	mat.SetStorageService(ts.Service)
-	mat.SetImageService(images.NewService(db))
+	mat := newTestMaterializer(t, db, ts.Service)
 
 	// Create source that yields a new image (not in DB yet)
 	src := &mockSource{
@@ -993,10 +985,7 @@ func TestTagsPersistence_TagsAreStored(t *testing.T) {
 	insertTestSource(t, db, sourceID.UUID.String(), "test-source")
 
 	// Setup materializer with services
-	mat := NewMaterializer(slog.New(slog.DiscardHandler))
-	mat.SetStorageService(ts.Service)
-	mat.SetImageService(images.NewService(db))
-	mat.SetTagsService(tags.NewService(db))
+	mat := newTestMaterializer(t, db, ts.Service)
 
 	// Create source that yields an image with tags
 	src := &mockSource{
@@ -1072,10 +1061,7 @@ func TestTagsPersistence_DedupeCaseInsensitive(t *testing.T) {
 	insertTestSource(t, db, sourceID.UUID.String(), "test-source")
 
 	// Setup materializer with services
-	mat := NewMaterializer(slog.New(slog.DiscardHandler))
-	mat.SetStorageService(ts.Service)
-	mat.SetImageService(images.NewService(db))
-	mat.SetTagsService(tags.NewService(db))
+	mat := newTestMaterializer(t, db, ts.Service)
 
 	// Create source that yields an image with duplicate tags (different cases)
 	src := &mockSource{
@@ -1185,9 +1171,7 @@ func TestThumbnail_CreatesThumbnailRow(t *testing.T) {
 	insertTestImageLocation(t, db, locationID.UUID.String(), imageID.UUID.String(), deviceID.UUID.String(), existingPath, StorageKindCanonical, true)
 
 	// Setup materializer
-	mat := NewMaterializer(slog.New(slog.DiscardHandler))
-	mat.SetStorageService(ts.Service)
-	mat.SetImageService(images.NewService(db))
+	mat := newTestMaterializer(t, db, ts.Service)
 
 	// Create source that yields the image
 	src := &mockSource{
@@ -1266,9 +1250,7 @@ func TestThumbnail_NoDuplicateRows(t *testing.T) {
 	insertTestImageLocation(t, db, locationID.UUID.String(), imageID.UUID.String(), deviceID.UUID.String(), existingPath, StorageKindCanonical, true)
 
 	// Setup materializer
-	mat := NewMaterializer(slog.New(slog.DiscardHandler))
-	mat.SetStorageService(ts.Service)
-	mat.SetImageService(images.NewService(db))
+	mat := newTestMaterializer(t, db, ts.Service)
 
 	// Create source that yields the image
 	src := &mockSource{
@@ -1341,9 +1323,7 @@ func TestThumbnail_UsesCanonicalFile(t *testing.T) {
 	insertTestImageLocation(t, db, locationAID.UUID.String(), imageID.UUID.String(), deviceAID.UUID.String(), canonicalPath, StorageKindCanonical, true)
 
 	// Setup materializer
-	mat := NewMaterializer(slog.New(slog.DiscardHandler))
-	mat.SetStorageService(ts.Service)
-	mat.SetImageService(images.NewService(db))
+	mat := newTestMaterializer(t, db, ts.Service)
 
 	// Create source that yields the image
 	src := &mockSource{

@@ -1,5 +1,6 @@
 <script lang="ts">
   import { useRuntimeStatus } from '../lib/api/queries';
+  import { Badge, Card, Separator } from '../lib/components/ui';
 
   const statusQuery = useRuntimeStatus();
 
@@ -8,160 +9,58 @@
   }
 </script>
 
-<div class="page">
-  <div class="page-header">
-    <h1>Runtime Status</h1>
-    <span class="updated">Last updated: {statusQuery.data ? formatTime(new Date()) : '-'}</span>
+<div class="space-y-6">
+  <div class="flex flex-wrap items-center justify-between gap-2">
+    <h1 class="text-2xl font-semibold tracking-tight">Runtime Status</h1>
+    <span class="text-sm text-slate-500">Last updated: {statusQuery.data ? formatTime(new Date()) : '-'}</span>
   </div>
 
   {#if statusQuery.isLoading}
-    <p>Loading...</p>
+    <p class="text-slate-500">Loading...</p>
   {:else if statusQuery.isError}
-    <p class="error">Failed to load status</p>
+    <p class="text-rose-600">Failed to load status</p>
   {:else if statusQuery.data}
-    <div class="status-grid">
-      <div class="status-card" class:ok={statusQuery.data.status === 'ok'} class:degraded={statusQuery.data.status === 'degraded'} class:stopping={statusQuery.data.status === 'stopping'}>
-        <h3>Overall Status</h3>
-        <p class="status-value">{statusQuery.data.status}</p>
-      </div>
+    <div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <Card class="p-4">
+        <p class="text-xs font-medium uppercase tracking-wide text-slate-500">Overall Status</p>
+        <div class="mt-2">
+          <Badge variant={statusQuery.data.status === 'ok' ? 'success' : statusQuery.data.status === 'degraded' ? 'warning' : 'destructive'}>
+            {statusQuery.data.status}
+          </Badge>
+        </div>
+      </Card>
 
-      <div class="status-card">
-        <h3>Queue</h3>
-        <p class="status-value">{statusQuery.data.queue_size}</p>
-        <p class="status-note">jobs pending</p>
-      </div>
+      <Card class="p-4">
+        <p class="text-xs font-medium uppercase tracking-wide text-slate-500">Queue</p>
+        <p class="mt-2 text-2xl font-semibold">{statusQuery.data.queue_size}</p>
+        <p class="text-sm text-slate-500">jobs pending</p>
+      </Card>
 
-      <div class="status-card">
-        <h3>Active Schedules</h3>
-        <p class="status-value">{statusQuery.data.schedule_count}</p>
-        <p class="status-note">configured</p>
-      </div>
+      <Card class="p-4">
+        <p class="text-xs font-medium uppercase tracking-wide text-slate-500">Active Schedules</p>
+        <p class="mt-2 text-2xl font-semibold">{statusQuery.data.schedule_count}</p>
+        <p class="text-sm text-slate-500">configured</p>
+      </Card>
 
-      <div class="status-card" class:ready={statusQuery.data.scheduler_ready} class:initializing={!statusQuery.data.scheduler_ready}>
-        <h3>Scheduler</h3>
-        <p class="status-value">{statusQuery.data.scheduler_ready ? 'Ready' : 'Initializing'}</p>
-      </div>
+      <Card class="p-4">
+        <p class="text-xs font-medium uppercase tracking-wide text-slate-500">Scheduler</p>
+        <p class="mt-2 text-2xl font-semibold">{statusQuery.data.scheduler_ready ? 'Ready' : 'Initializing'}</p>
+        <p class="text-sm text-slate-500">{statusQuery.data.scheduler_ready ? 'Ready to enqueue jobs' : 'Booting'}</p>
+      </Card>
 
-      <div class="status-card" class:active={statusQuery.data.runner_active} class:idle={!statusQuery.data.runner_active}>
-        <h3>Runner</h3>
-        <p class="status-value">{statusQuery.data.runner_active ? 'Active' : 'Idle'}</p>
-      </div>
+      <Card class="p-4 sm:col-span-2 xl:col-span-4">
+        <div class="flex items-center justify-between gap-2">
+          <p class="text-xs font-medium uppercase tracking-wide text-slate-500">Runner</p>
+          <Badge variant={statusQuery.data.runner_active ? 'success' : 'secondary'}>{statusQuery.data.runner_active ? 'Active' : 'Idle'}</Badge>
+        </div>
+        <Separator class="my-3" />
+        <p class="text-sm text-slate-500">Background job runner state is managed in-process.</p>
+      </Card>
     </div>
 
-    <div class="info-section">
-      <h2>About Walens</h2>
-      <p>Walens is a self-hosted wallpaper collection manager. It fetches images from configured sources on a schedule and delivers them to your devices.</p>
-    </div>
+    <Card class="p-4">
+      <h2 class="text-lg font-semibold">About Walens</h2>
+      <p class="mt-2 text-sm text-slate-500">Walens is a self-hosted wallpaper collection manager. It fetches images from configured sources on a schedule and delivers them to your devices.</p>
+    </Card>
   {/if}
 </div>
-
-<style>
-  .page {
-    padding: 1rem;
-  }
-
-  .page-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 1.5rem;
-  }
-
-  h1 {
-    margin: 0;
-    font-size: 1.5rem;
-  }
-
-  .updated {
-    font-size: 0.85rem;
-    color: #888;
-  }
-
-  .status-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-    gap: 1rem;
-    margin-bottom: 2rem;
-  }
-
-  .status-card {
-    background: white;
-    border-radius: 8px;
-    padding: 1.25rem;
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
-    text-align: center;
-  }
-
-  .status-card h3 {
-    margin: 0 0 0.5rem;
-    font-size: 0.85rem;
-    color: #666;
-    text-transform: uppercase;
-    font-weight: 500;
-  }
-
-  .status-value {
-    margin: 0;
-    font-size: 1.75rem;
-    font-weight: 600;
-    color: #333;
-  }
-
-  .status-note {
-    margin: 0.25rem 0 0;
-    font-size: 0.8rem;
-    color: #888;
-  }
-
-  /* Status colors */
-  .ok .status-value {
-    color: #2e7d32;
-  }
-
-  .degraded .status-value {
-    color: #f57c00;
-  }
-
-  .stopping .status-value {
-    color: #c62828;
-  }
-
-  .ready .status-value {
-    color: #2e7d32;
-  }
-
-  .initializing .status-value {
-    color: #f57c00;
-  }
-
-  .active .status-value {
-    color: #1976d2;
-  }
-
-  .idle .status-value {
-    color: #888;
-  }
-
-  .info-section {
-    background: white;
-    border-radius: 8px;
-    padding: 1.25rem;
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
-  }
-
-  .info-section h2 {
-    margin: 0 0 0.5rem;
-    font-size: 1.1rem;
-  }
-
-  .info-section p {
-    margin: 0;
-    color: #666;
-    font-size: 0.9rem;
-    line-height: 1.5;
-  }
-
-  .error {
-    color: #c33;
-  }
-</style>

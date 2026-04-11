@@ -2,7 +2,7 @@ package scheduler
 
 import (
 	"context"
-	"database/sql"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -32,48 +32,63 @@ type ScheduledJob struct {
 	CronExpr   string
 }
 
+// SourceSchedule represents a source with its schedule.
+type SourceSchedule struct {
+	SourceID   dbtypes.UUID
+	SourceName string
+	SourceType string
+	ScheduleID dbtypes.UUID
+	CronExpr   string
+}
+
 // Scheduler manages cron-based job scheduling for source syncs.
 type Scheduler struct {
-	logger    *slog.Logger
-	db        *sql.DB
-	jobsSvc   *jobs.Service
-	cron      *cron.Cron
-	mu        sync.RWMutex
-	ctx       context.Context
-	cancel    context.CancelFunc
-	wg        sync.WaitGroup
-	ready     bool
-	schedules map[string]ScheduledJob // key: "sourceID:scheduleID"
-	enqueueFn func(jobID string)      // function to enqueue job to the queue
+	logger         *slog.Logger
+	jobsSvc        *jobs.Service
+	scheduleLoader ScheduleLoader
+	cron           *cron.Cron
+	mu             sync.RWMutex
+	ctx            context.Context
+	cancel         context.CancelFunc
+	wg             sync.WaitGroup
+	ready          bool
+	schedules      map[string]ScheduledJob // key: "sourceID:scheduleID"
+	enqueueFn      func(jobID string)      // function to enqueue job to the queue
+}
+
+type SchedulerDependencies struct {
+	Logger      *slog.Logger
+	Loader      ScheduleLoader
+	JobsService *jobs.Service
+	EnqueueFunc func(jobID string)
+}
+
+// ScheduleLoader loads enabled schedules for the scheduler runtime.
+type ScheduleLoader interface {
+	LoadEnabledSourceSchedules(ctx context.Context) ([]SourceSchedule, error)
 }
 
 // New creates a new scheduler instance.
-func New(logger *slog.Logger) *Scheduler {
-	return &Scheduler{
-		logger:    logger,
-		schedules: make(map[string]ScheduledJob),
+func New(deps SchedulerDependencies) *Scheduler {
+	if deps.Logger == nil {
+		panic("scheduler.New: Logger is required")
 	}
-}
-
-// SetDB sets the database handle for schedule queries.
-func (s *Scheduler) SetDB(db *sql.DB) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.db = db
-}
-
-// SetJobsService sets the jobs service for creating jobs.
-func (s *Scheduler) SetJobsService(svc *jobs.Service) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.jobsSvc = svc
-}
-
-// SetEnqueueFunc sets the function used to enqueue jobs.
-func (s *Scheduler) SetEnqueueFunc(fn func(jobID string)) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.enqueueFn = fn
+	if deps.Loader == nil {
+		panic("scheduler.New: Loader is required")
+	}
+	if deps.JobsService == nil {
+		panic("scheduler.New: JobsService is required")
+	}
+	if deps.EnqueueFunc == nil {
+		panic("scheduler.New: EnqueueFunc is required")
+	}
+	return &Scheduler{
+		logger:         deps.Logger,
+		scheduleLoader: deps.Loader,
+		jobsSvc:        deps.JobsService,
+		enqueueFn:      deps.EnqueueFunc,
+		schedules:      make(map[string]ScheduledJob),
+	}
 }
 
 // Start begins the scheduler background goroutine.
@@ -88,14 +103,17 @@ func (s *Scheduler) Start(ctx context.Context) error {
 	s.ctx, s.cancel = context.WithCancel(ctx)
 	s.mu.Unlock()
 
-	// Create cron with seconds support and logging
+	// Create cron with the same 5-field parser as schedule validation and logging.
 	cronLog := &cronLogger{logger: s.logger}
-	s.cron = cron.New(cron.WithSeconds(), cron.WithLogger(cron.VerbosePrintfLogger(cronLog)))
+	s.cron = cron.New(
+		cron.WithParser(cron.NewParser(cron.Minute|cron.Hour|cron.Dom|cron.Month|cron.Dow)),
+		cron.WithLogger(cron.VerbosePrintfLogger(cronLog)),
+	)
 
 	s.wg.Add(1)
 	go s.run()
 
-	// Perform initial reload to load schedules from DB.
+	// Perform initial reload to load schedules from the loader.
 	if err := s.Reload(); err != nil {
 		s.logger.Error("initial scheduler reload failed", "error", err)
 	}
@@ -123,27 +141,36 @@ func (s *Scheduler) run() {
 // This should be called whenever sources, source_schedules, or their
 // enabled/disabled state changes.
 func (s *Scheduler) Reload() error {
+	s.logger.Info("scheduler reload: loading sources and schedules from loader")
+
+	s.mu.RLock()
+	loader := s.scheduleLoader
+	ctx := s.ctx
+	s.mu.RUnlock()
+
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	loadCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	sourceSchedules, err := loader.LoadEnabledSourceSchedules(loadCtx)
+	if err != nil {
+		return fmt.Errorf("load enabled source schedules: %w", err)
+	}
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if s.db == nil {
-		s.logger.Warn("scheduler reload: database not available")
-		return nil
+	if s.cron == nil {
+		return errors.New("scheduler not started")
 	}
-
-	s.logger.Info("scheduler reload: loading sources and schedules from database")
 
 	// Clear existing schedules from cron
 	for key, scheduled := range s.schedules {
 		s.cron.Remove(scheduled.EntryID)
 		delete(s.schedules, key)
 		s.logger.Debug("scheduler reload: removed existing schedule", "key", key)
-	}
-
-	// Load enabled sources with their enabled schedules
-	sourceSchedules, err := s.loadEnabledSourceSchedules()
-	if err != nil {
-		return fmt.Errorf("load enabled source schedules: %w", err)
 	}
 
 	// Add each schedule to cron
@@ -161,69 +188,6 @@ func (s *Scheduler) Reload() error {
 	s.ready = true
 	s.logger.Info("scheduler reload complete", "schedules_loaded", len(s.schedules))
 	return nil
-}
-
-// SourceSchedule represents a source with its schedule
-type SourceSchedule struct {
-	SourceID   dbtypes.UUID
-	SourceName string
-	SourceType string
-	ScheduleID dbtypes.UUID
-	CronExpr   string
-}
-
-// loadEnabledSourceSchedules loads all enabled sources with their enabled schedules.
-func (s *Scheduler) loadEnabledSourceSchedules() ([]SourceSchedule, error) {
-	query := `
-		SELECT 
-			s.id as source_id,
-			s.name as source_name,
-			s.source_type,
-			ss.id as schedule_id,
-			ss.cron_expr
-		FROM sources s
-		INNER JOIN source_schedules ss ON ss.source_id = s.id
-		WHERE s.is_enabled = 1 AND ss.is_enabled = 1
-		ORDER BY s.id, ss.id
-	`
-
-	rows, err := s.db.Query(query)
-	if err != nil {
-		return nil, fmt.Errorf("query enabled source schedules: %w", err)
-	}
-	defer rows.Close()
-
-	var results []SourceSchedule
-	for rows.Next() {
-		var ss SourceSchedule
-		var sourceIDStr, scheduleIDStr string
-		if err := rows.Scan(&sourceIDStr, &ss.SourceName, &ss.SourceType, &scheduleIDStr, &ss.CronExpr); err != nil {
-			s.logger.Warn("failed to scan source schedule", "error", err)
-			continue
-		}
-
-		sourceID, err := dbtypes.NewUUIDFromString(sourceIDStr)
-		if err != nil {
-			s.logger.Warn("failed to parse source ID", "error", err, "value", sourceIDStr)
-			continue
-		}
-		ss.SourceID = sourceID
-
-		scheduleID, err := dbtypes.NewUUIDFromString(scheduleIDStr)
-		if err != nil {
-			s.logger.Warn("failed to parse schedule ID", "error", err, "value", scheduleIDStr)
-			continue
-		}
-		ss.ScheduleID = scheduleID
-
-		results = append(results, ss)
-	}
-
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate source schedules: %w", err)
-	}
-
-	return results, nil
 }
 
 // addScheduleLocked adds a single schedule to the cron (must be called with lock held).
@@ -274,11 +238,6 @@ func (s *Scheduler) executeScheduledJob(ss SourceSchedule) {
 		"source_name", ss.SourceName,
 		"schedule_id", ss.ScheduleID.UUID.String())
 
-	if s.jobsSvc == nil {
-		s.logger.Error("cannot execute scheduled job: jobs service not set")
-		return
-	}
-
 	// Create the job
 	req := jobs.CreateJobRequest{
 		JobType:             jobs.JobTypeSourceSync,
@@ -303,12 +262,8 @@ func (s *Scheduler) executeScheduledJob(ss SourceSchedule) {
 	s.logger.Info("scheduled job created", "job_id", jobID)
 
 	// Enqueue to the in-memory queue
-	if s.enqueueFn != nil {
-		s.enqueueFn(jobID)
-		s.logger.Info("scheduled job enqueued", "job_id", jobID)
-	} else {
-		s.logger.Warn("scheduled job not enqueued: enqueue function not set", "job_id", jobID)
-	}
+	s.enqueueFn(jobID)
+	s.logger.Info("scheduled job enqueued", "job_id", jobID)
 }
 
 // Stop gracefully stops the scheduler.

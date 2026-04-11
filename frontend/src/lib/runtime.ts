@@ -1,4 +1,5 @@
-// Runtime configuration injected by backend via window.__WALENS__
+import { joinBasePath, normalizeBasePath } from './path';
+
 export interface WalensRuntimeConfig {
   basePath: string;
   apiBase: string;
@@ -10,19 +11,18 @@ declare global {
   }
 }
 
-// Get runtime config from window.__WALENS__, with safe defaults
 export function getRuntimeConfig(): WalensRuntimeConfig {
-  return window.__WALENS__ ?? { basePath: '/', apiBase: '/api' };
+  const runtime = window.__WALENS__;
+  const basePath = normalizeBasePath(runtime?.basePath ?? '/');
+  const apiBase = normalizeBasePath(runtime?.apiBase ?? joinBasePath(basePath, 'api'));
+
+  return { basePath, apiBase };
 }
 
-// Derive the full API base URL
-export function getApiUrl(): string {
-  const { basePath, apiBase } = getRuntimeConfig();
-  // apiBase is already prefixed with basePath in the backend
-  return apiBase;
+export function buildAppPath(...segments: string[]): string {
+  return joinBasePath(getRuntimeConfig().basePath, ...segments);
 }
 
-// Build a full URL given an API path
-export function buildApiUrl(path: string): string {
-  return `${getApiUrl()}${path}`;
+export function buildApiPath(...segments: string[]): string {
+  return joinBasePath(getRuntimeConfig().apiBase, ...segments);
 }

@@ -1,10 +1,9 @@
-package app
+package frontend
 
 import (
 	"embed"
 	"encoding/json"
 	"fmt"
-	"io"
 	"io/fs"
 	"net/http"
 	"path"
@@ -197,9 +196,9 @@ func IsAssetPath(p string) bool {
 		ext == ".webp" || ext == ".gif" || ext == ".avif"
 }
 
-// escapeForJS escapes a string for safe injection into a JavaScript string literal.
+// EscapeForJS escapes a string for safe injection into a JavaScript string literal.
 // Deprecated: Use json.Marshal instead for safe injection.
-func escapeForJS(s string) string {
+func EscapeForJS(s string) string {
 	var builder strings.Builder
 	builder.WriteByte('"')
 	for _, c := range s {
@@ -248,9 +247,9 @@ func ServeSPAWithConfig(w http.ResponseWriter, r *http.Request, basePath, apiBas
 
 	w.WriteHeader(http.StatusOK)
 	fmt.Fprintf(w, tmpl,
-		escapeForJS(basePath),
-		escapeForJS(apiBase),
-		escapeForJS(entryPoint),
+		EscapeForJS(basePath),
+		EscapeForJS(apiBase),
+		EscapeForJS(entryPoint),
 	)
 }
 
@@ -259,53 +258,15 @@ func ServeSPAWithConfig(w http.ResponseWriter, r *http.Request, basePath, apiBas
 func SPAFileServer(basePath string, staticFS fs.FS) http.Handler {
 	return &spaFileServer{
 		basePath: basePath,
-		staticFS: staticFS,
+		fs:       staticFS,
 	}
 }
 
-// spaFileServer is deprecated.
 type spaFileServer struct {
 	basePath string
-	staticFS fs.FS
+	fs       fs.FS
 }
 
-// ServeHTTP is deprecated.
 func (s *spaFileServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	reqPath := path.Clean(r.URL.Path)
-	if !strings.HasPrefix(reqPath, s.basePath) {
-		reqPath = s.basePath + reqPath
-	}
-	reqPath = strings.TrimPrefix(reqPath, s.basePath)
-	if reqPath == "" {
-		reqPath = "/"
-	}
-
-	// Try to open the file
-	file, err := s.staticFS.Open(reqPath)
-	if err == nil {
-		file.Close()
-		// If it's an asset, serve it normally
-		if IsAssetPath(reqPath) {
-			http.FileServer(http.FS(s.staticFS)).ServeHTTP(w, r)
-			return
-		}
-	}
-
-	// For SPA routes (non-asset paths), serve index.html
-	indexFile, err := s.staticFS.Open("/index.html")
-	if err != nil {
-		http.NotFound(w, r)
-		return
-	}
-	defer indexFile.Close()
-
-	content, err := io.ReadAll(indexFile)
-	if err != nil {
-		http.NotFound(w, r)
-		return
-	}
-
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.WriteHeader(http.StatusOK)
-	w.Write(content)
+	http.NotFound(w, r)
 }

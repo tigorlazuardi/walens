@@ -61,10 +61,26 @@ export type Image = components['schemas']['Images'];
 export type ListImagesRequest = components['schemas']['ListImagesRequest'];
 export type ListImagesResponse = components['schemas']['ListImagesResponse'];
 export type ListDeviceImagesRequest = components['schemas']['ListDeviceImagesRequest'];
-// SetImageFavorite uses `is_favorite` in the schema (map from `favorite` in client wrapper)
-export type SetImageFavoriteRequest = components['schemas']['SetImageFavoriteInput'];
-// BlacklistImage uses `image_id` in the schema (map from `id` in client wrapper)
-export type BlacklistImageRequest = components['schemas']['BlacklistImageInput'];
+// ==================== Image Mutations (App-facing wrappers) ====================
+// These use friendlier field names than the generated schema.
+// The client maps them to the generated field names before sending.
+
+// App-facing: uses `favorite` instead of `is_favorite`
+export interface SetImageFavoriteRequest {
+  id: string;
+  favorite: boolean;
+}
+
+// App-facing: uses `id` instead of `image_id`
+export interface BlacklistImageRequest {
+  id: string;
+  reason?: string | null;
+}
+
+// ==================== Image Mutations (Generated schema aliases) ====================
+// Original generated schema shapes — used internally by the client.
+export type SetImageFavoriteInput = components['schemas']['SetImageFavoriteInput'];
+export type BlacklistImageInput = components['schemas']['BlacklistImageInput'];
 export type DeleteImageRequest = components['schemas']['DeleteImageInput'];
 
 // ==================== Jobs ====================
@@ -74,9 +90,21 @@ export type ListJobsRequest = components['schemas']['ListJobsRequest'];
 export type ListJobsResponse = components['schemas']['ListJobsResponse'];
 export type GetJobRequest = components['schemas']['GetJobRequest'];
 
+/** Job status: queued, running, succeeded, failed, cancelled */
+export type JobStatus = string;
+/** Job type: source_sync, source_download */
+export type JobType = string;
+/** Trigger kind: manual, schedule, recovery */
+export type TriggerKind = string;
+
 // ==================== Runtime Status ====================
 
 export type RuntimeStatus = components['schemas']['RuntimeStatusOutputBody'];
 
 // Expose paths type for openapi-fetch
 export type { paths };
+
+// ==================== Error Types ====================
+
+/** Standard error response shape from the API. */
+export type ErrorModel = components["schemas"]["ErrorModel"];

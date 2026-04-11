@@ -20,6 +20,8 @@ import (
 	"github.com/walens/walens/internal/config"
 	"github.com/walens/walens/internal/db"
 	"github.com/walens/walens/internal/dbtypes"
+	"github.com/walens/walens/internal/frontend"
+	httpmiddleware "github.com/walens/walens/internal/http/middleware"
 	"github.com/walens/walens/internal/logger"
 	"github.com/walens/walens/internal/queue"
 	"github.com/walens/walens/internal/routes"
@@ -29,6 +31,7 @@ import (
 	"github.com/walens/walens/internal/services/configs"
 	"github.com/walens/walens/internal/services/images"
 	"github.com/walens/walens/internal/services/jobs"
+	schedulessvc "github.com/walens/walens/internal/services/source_schedules"
 	sourcesvc "github.com/walens/walens/internal/services/sources"
 	"github.com/walens/walens/internal/services/tags"
 	"github.com/walens/walens/internal/sources"
@@ -39,24 +42,35 @@ import (
 
 type authCookieSecureContextKey struct{}
 
+type scheduleLoaderFunc func(context.Context) ([]scheduler.SourceSchedule, error)
+
+func (f scheduleLoaderFunc) LoadEnabledSourceSchedules(ctx context.Context) ([]scheduler.SourceSchedule, error) {
+	return f(ctx)
+}
+
+type schedulerReloadFunc func() error
+
+func (f schedulerReloadFunc) Reload() error { return f() }
+
 // App manages the lifecycle of all application components.
 type App struct {
-	config         *config.Config
-	logger         *slog.Logger
-	db             *sql.DB
-	configService  *configs.Service
-	jobsService    *jobs.Service
-	sourcesService *sourcesvc.Service
-	sourceRegistry *sources.Registry
-	storageSvc     *storage.Service
-	imageSvc       *images.Service
-	tagsService    *tags.Service
-	server         *http.Server
-	scheduler      *scheduler.Scheduler
-	queue          *queue.Queue
-	runner         *runner.Runner
-	handler        http.Handler
-	api            huma.API
+	config                 *config.Config
+	logger                 *slog.Logger
+	db                     *sql.DB
+	configService          *configs.Service
+	jobsService            *jobs.Service
+	sourceSchedulesService *schedulessvc.Service
+	sourcesService         *sourcesvc.Service
+	sourceRegistry         *sources.Registry
+	storageSvc             *storage.Service
+	imageSvc               *images.Service
+	tagsService            *tags.Service
+	server                 *http.Server
+	scheduler              *scheduler.Scheduler
+	queue                  *queue.Queue
+	runner                 *runner.Runner
+	handler                http.Handler
+	api                    huma.API
 }
 
 // New creates a new application instance.
@@ -64,17 +78,12 @@ func New(cfg *config.Config) *App {
 	log := logger.New(cfg.LogLevel)
 
 	q := queue.New(log)
-	sc := scheduler.New(log)
-	ru := runner.New(log)
-	ru.SetQueue(q)
 	registry := newSourceRegistry()
 
 	return &App{
 		config:         cfg,
 		logger:         log,
-		scheduler:      sc,
 		queue:          q,
-		runner:         ru,
 		sourceRegistry: registry,
 	}
 }
@@ -114,7 +123,7 @@ func (a *App) Start() error {
 		return fmt.Errorf("failed to initialize database: %w", err)
 	}
 
-	// 2. Start scheduler (needs DB for reload)
+	// 2. Start scheduler (uses injected schedule loader for reload)
 	if err := a.scheduler.Start(ctx); err != nil {
 		return fmt.Errorf("failed to start scheduler: %w", err)
 	}
@@ -156,9 +165,6 @@ func (a *App) initDB() error {
 	// Load persisted config after migrations. If absent or empty, inject defaults.
 	a.configService = configs.NewService(a.db)
 
-	// Initialize sources service with db and registry
-	a.sourcesService = sourcesvc.NewService(a.db, a.sourceRegistry)
-
 	// Initialize jobs service
 	a.jobsService = jobs.NewService(a.db)
 
@@ -190,22 +196,36 @@ func (a *App) initDB() error {
 	// Rebuild logger with persisted log level, then rebuild dependent components.
 	a.logger = logger.New(persistedCfg.LogLevel)
 	a.queue = queue.New(a.logger)
-	a.runner = runner.New(a.logger)
-	a.runner.SetQueue(a.queue)
-	a.runner.SetJobsService(a.jobsService)
-	a.runner.SetStorageService(a.storageSvc)
-	a.runner.SetImageService(a.imageSvc)
-	a.runner.SetTagsService(a.tagsService)
-	a.runner.SetSourceRegistry(a.sourceRegistry)
-	a.scheduler = scheduler.New(a.logger)
+	if a.sourceRegistry == nil {
+		a.sourceRegistry = newSourceRegistry()
+	}
 
-	// Give scheduler access to DB and jobs service for reload queries and job creation
-	a.scheduler.SetDB(a.db)
-	a.scheduler.SetJobsService(a.jobsService)
-	a.scheduler.SetEnqueueFunc(a.queue.Enqueue)
-
-	// Wire up scheduler reload to services that need it
-	a.sourcesService.SetScheduler(a.scheduler)
+	var schedSvc *schedulessvc.Service
+	a.scheduler = scheduler.New(
+		scheduler.SchedulerDependencies{
+			Logger: a.logger,
+			Loader: scheduleLoaderFunc(func(ctx context.Context) ([]scheduler.SourceSchedule, error) {
+				return schedSvc.LoadEnabledSourceSchedules(ctx)
+			}),
+			JobsService: a.jobsService,
+			EnqueueFunc: a.queue.Enqueue,
+		},
+	)
+	reloadScheduler := schedulerReloadFunc(func() error {
+		return a.scheduler.Reload()
+	})
+	schedSvc = schedulessvc.NewService(a.db, reloadScheduler)
+	a.sourceSchedulesService = schedSvc
+	a.sourcesService = sourcesvc.NewService(sourcesvc.ServiceDependencies{DB: a.db, Registry: a.sourceRegistry, Scheduler: reloadScheduler})
+	a.runner = runner.New(runner.RunnerDependencies{
+		Logger:         a.logger,
+		Queue:          a.queue,
+		JobsService:    a.jobsService,
+		StorageService: a.storageSvc,
+		ImageService:   a.imageSvc,
+		TagsService:    a.tagsService,
+		SourceRegistry: a.sourceRegistry,
+	})
 
 	return nil
 }
@@ -214,10 +234,6 @@ func (a *App) initDB() error {
 // It retrieves queued and running jobs, resets running jobs to queued state,
 // marks them for recovery, and enqueues them in the in-memory queue.
 func (a *App) recoverJobs(ctx context.Context) error {
-	if a.jobsService == nil || a.db == nil {
-		return nil
-	}
-
 	// Get all jobs that need recovery (queued and running)
 	jobsToRecover, err := a.jobsService.GetJobsForRecovery(ctx)
 	if err != nil {
@@ -335,7 +351,19 @@ func (a *App) buildHTTPHandler() http.Handler {
 	if a.sourceRegistry == nil {
 		a.sourceRegistry = newSourceRegistry()
 	}
-	a.sourcesService = sourcesvc.NewService(a.db, a.sourceRegistry)
+	if a.queue == nil {
+		a.queue = queue.New(a.logger)
+	}
+	reloadScheduler := schedulerReloadFunc(func() error {
+		if a.scheduler == nil {
+			return nil
+		}
+		return a.scheduler.Reload()
+	})
+	a.sourcesService = sourcesvc.NewService(sourcesvc.ServiceDependencies{DB: a.db, Registry: a.sourceRegistry, Scheduler: reloadScheduler})
+	if a.sourceSchedulesService == nil && a.db != nil {
+		a.sourceSchedulesService = schedulessvc.NewService(a.db, a.scheduler)
+	}
 	humaConfig := huma.DefaultConfig("Walens API", "0.0.1")
 	humaConfig.FieldsOptionalByDefault = true
 	humaConfig.OpenAPIPath = joinPath(basePath, "/openapi")
@@ -374,7 +402,7 @@ func (a *App) buildHTTPHandler() http.Handler {
 		mux.ServeHTTP(w, r.WithContext(ctx))
 	})
 	if authConfig.Enabled {
-		apiHandler = authConfig.Middleware()(apiHandler)
+		apiHandler = httpmiddleware.NewAuth(authConfig)(apiHandler)
 	}
 
 	// Create SPA handler for frontend fallback
@@ -389,7 +417,7 @@ func (a *App) buildHTTPHandler() http.Handler {
 		}
 	}
 
-	spa, err := NewSPAHandler(
+	spa, err := frontend.NewSPAHandler(
 		basePath,
 		a.config.Frontend.ViteURL,
 		a.config.Frontend.DevMode,
@@ -475,11 +503,6 @@ func (a *App) registerHumaRoutes(api huma.API, basePath string, authConfig auth.
 		output.Body.QueueSize = a.queue.Size()
 		output.Body.Status = "ok"
 
-		if a.db == nil {
-			output.Body.Status = "degraded"
-			return output, huma.Error503ServiceUnavailable("database unavailable")
-		}
-
 		pingCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 		defer cancel()
 
@@ -537,7 +560,7 @@ func (a *App) registerHumaRoutes(api huma.API, basePath string, authConfig auth.
 	routes.RegisterSourcesRoutes(api, basePath, a.sourcesService)
 
 	// Register source_schedules RPC routes
-	routes.RegisterSourceSchedulesRoutes(api, basePath, a.db, a.scheduler)
+	routes.RegisterSourceSchedulesRoutes(api, basePath, a.sourceSchedulesService)
 
 	// Register devices RPC routes
 	routes.RegisterDevicesRoutes(api, basePath, a.db)

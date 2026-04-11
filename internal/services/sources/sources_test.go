@@ -56,7 +56,7 @@ func TestServiceListSourcesEmpty(t *testing.T) {
 	defer db.Close()
 	createSourcesTable(t, db)
 
-	svc := NewService(db, testRegistry())
+	svc := NewService(ServiceDependencies{DB: db, Registry: testRegistry()})
 	items, err := svc.ListSources(context.Background(), ListSourcesRequest{})
 	if err != nil {
 		t.Fatalf("ListSources failed: %v", err)
@@ -82,7 +82,7 @@ func TestServiceListSourcesWithData(t *testing.T) {
 		t.Fatalf("insert test source: %v", err)
 	}
 
-	svc := NewService(db, testRegistry())
+	svc := NewService(ServiceDependencies{DB: db, Registry: testRegistry()})
 	items, err := svc.ListSources(context.Background(), ListSourcesRequest{})
 	if err != nil {
 		t.Fatalf("ListSources failed: %v", err)
@@ -114,7 +114,7 @@ func TestServiceGetSource(t *testing.T) {
 		t.Fatalf("insert test source: %v", err)
 	}
 
-	svc := NewService(db, testRegistry())
+	svc := NewService(ServiceDependencies{DB: db, Registry: testRegistry()})
 	id, _ := dbtypes.NewUUIDFromString("01800000-0000-0000-0000-000000000001")
 	src, err := svc.GetSource(context.Background(), GetSourceRequest{ID: id})
 	if err != nil {
@@ -130,7 +130,7 @@ func TestServiceGetSourceNotFound(t *testing.T) {
 	defer db.Close()
 	createSourcesTable(t, db)
 
-	svc := NewService(db, testRegistry())
+	svc := NewService(ServiceDependencies{DB: db, Registry: testRegistry()})
 	id, _ := dbtypes.NewUUIDFromString("01800000-0000-0000-0000-000000000001")
 	_, err := svc.GetSource(context.Background(), GetSourceRequest{ID: id})
 	if err == nil {
@@ -143,7 +143,7 @@ func TestServiceCreateSource(t *testing.T) {
 	defer db.Close()
 	createSourcesTable(t, db)
 
-	svc := NewService(db, testRegistry())
+	svc := NewService(ServiceDependencies{DB: db, Registry: testRegistry()})
 	input := CreateSourceRequest{
 		Name:        "my-source",
 		SourceType:  "booru",
@@ -172,7 +172,7 @@ func TestServiceCreateSourceKeepsZeroLookupCount(t *testing.T) {
 	defer db.Close()
 	createSourcesTable(t, db)
 
-	svc := NewService(db, testRegistry())
+	svc := NewService(ServiceDependencies{DB: db, Registry: testRegistry()})
 	input := CreateSourceRequest{
 		Name:        "my-source",
 		SourceType:  "booru",
@@ -206,7 +206,7 @@ func TestServiceCreateSourceDuplicateName(t *testing.T) {
 		t.Fatalf("insert test source: %v", err)
 	}
 
-	svc := NewService(db, testRegistry())
+	svc := NewService(ServiceDependencies{DB: db, Registry: testRegistry()})
 	input := CreateSourceRequest{
 		Name:        "existing-source",
 		SourceType:  "booru",
@@ -226,7 +226,7 @@ func TestServiceCreateSourceInvalidType(t *testing.T) {
 	defer db.Close()
 	createSourcesTable(t, db)
 
-	svc := NewService(db, testRegistry())
+	svc := NewService(ServiceDependencies{DB: db, Registry: testRegistry()})
 	input := CreateSourceRequest{
 		Name:        "my-source",
 		SourceType:  "nonexistent",
@@ -246,7 +246,7 @@ func TestServiceCreateSourceInvalidParams(t *testing.T) {
 	defer db.Close()
 	createSourcesTable(t, db)
 
-	svc := NewService(db, testRegistry())
+	svc := NewService(ServiceDependencies{DB: db, Registry: testRegistry()})
 	// booru requires at least one tag or booru_host
 	input := CreateSourceRequest{
 		Name:        "my-source",
@@ -278,7 +278,7 @@ func TestServiceUpdateSource(t *testing.T) {
 		t.Fatalf("insert test source: %v", err)
 	}
 
-	svc := NewService(db, testRegistry())
+	svc := NewService(ServiceDependencies{DB: db, Registry: testRegistry()})
 	id, _ := dbtypes.NewUUIDFromString("01800000-0000-0000-0000-000000000001")
 	input := UpdateSourceRequest{
 		ID:          id,
@@ -309,7 +309,7 @@ func TestServiceUpdateSourceNotFound(t *testing.T) {
 	defer db.Close()
 	createSourcesTable(t, db)
 
-	svc := NewService(db, testRegistry())
+	svc := NewService(ServiceDependencies{DB: db, Registry: testRegistry()})
 	id, _ := dbtypes.NewUUIDFromString("01800000-0000-0000-0000-000000000001")
 	input := UpdateSourceRequest{
 		ID:          id,
@@ -351,7 +351,7 @@ func TestServiceUpdateSourceDuplicateName(t *testing.T) {
 		t.Fatalf("insert test source 2: %v", err)
 	}
 
-	svc := NewService(db, testRegistry())
+	svc := NewService(ServiceDependencies{DB: db, Registry: testRegistry()})
 	id, _ := dbtypes.NewUUIDFromString("01800000-0000-0000-0000-000000000001")
 	input := UpdateSourceRequest{
 		ID:          id,
@@ -384,7 +384,7 @@ func TestServiceDeleteSource(t *testing.T) {
 		t.Fatalf("insert test source: %v", err)
 	}
 
-	svc := NewService(db, testRegistry())
+	svc := NewService(ServiceDependencies{DB: db, Registry: testRegistry()})
 	id, _ := dbtypes.NewUUIDFromString("01800000-0000-0000-0000-000000000001")
 	_, err = svc.DeleteSource(context.Background(), DeleteSourceRequest{ID: id})
 	if err != nil {
@@ -403,7 +403,7 @@ func TestServiceDeleteSourceNotFound(t *testing.T) {
 	defer db.Close()
 	createSourcesTable(t, db)
 
-	svc := NewService(db, testRegistry())
+	svc := NewService(ServiceDependencies{DB: db, Registry: testRegistry()})
 	id, _ := dbtypes.NewUUIDFromString("01800000-0000-0000-0000-000000000001")
 	_, err := svc.DeleteSource(context.Background(), DeleteSourceRequest{ID: id})
 	if err == nil {
@@ -411,20 +411,18 @@ func TestServiceDeleteSourceNotFound(t *testing.T) {
 	}
 }
 
-func TestServiceReturnsErrRegistryUnavailableWhenRegistryIsNil(t *testing.T) {
+func TestServicePanicsWhenRegistryIsNil(t *testing.T) {
 	db := openTestDB(t)
 	defer db.Close()
 	createSourcesTable(t, db)
 
-	svc := NewService(db, nil)
-	_, err := svc.CreateSource(context.Background(), CreateSourceRequest{
-		Name:       "my-source",
-		SourceType: "booru",
-		Params:     json.RawMessage(`{"tags":["nature"]}`),
-	})
-	if err == nil {
-		t.Errorf("expected ErrRegistryUnavailable, got %v", err)
-	}
+	defer func() {
+		if r := recover(); r == nil {
+			t.Fatal("expected panic when registry is nil")
+		}
+	}()
+
+	_ = NewService(ServiceDependencies{DB: db})
 }
 
 // TestListSources_TotalCount verifies that Total reflects all matching rows independent of pagination.
@@ -461,7 +459,7 @@ func TestListSources_TotalCount(t *testing.T) {
 		}
 	}
 
-	svc := NewService(db, testRegistry())
+	svc := NewService(ServiceDependencies{DB: db, Registry: testRegistry()})
 
 	// Test: Total should be 5 for search matching "alpha"
 	search := "alpha"
@@ -505,7 +503,7 @@ func TestListSources_TotalNotAffectedByPagination(t *testing.T) {
 		}
 	}
 
-	svc := NewService(db, testRegistry())
+	svc := NewService(ServiceDependencies{DB: db, Registry: testRegistry()})
 
 	// First page with small limit
 	limit := 3

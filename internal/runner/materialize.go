@@ -57,31 +57,35 @@ type Materializer struct {
 	tagsSvc    *tags.Service
 }
 
+type MaterializerDependencies struct {
+	Logger         *slog.Logger
+	StorageService *storage.Service
+	ImageService   *images.Service
+	JobsService    *jobs.Service
+	TagsService    *tags.Service
+}
+
 // NewMaterializer creates a new Materializer.
-func NewMaterializer(logger *slog.Logger) *Materializer {
-	return &Materializer{
-		logger: logger,
+func NewMaterializer(deps MaterializerDependencies) *Materializer {
+	if deps.Logger == nil {
+		panic("runner.NewMaterializer: Logger is required")
 	}
-}
-
-// SetStorageService sets the storage service.
-func (m *Materializer) SetStorageService(svc *storage.Service) {
-	m.storageSvc = svc
-}
-
-// SetImageService sets the image service.
-func (m *Materializer) SetImageService(svc *images.Service) {
-	m.imageSvc = svc
-}
-
-// SetJobsService sets the jobs service.
-func (m *Materializer) SetJobsService(svc *jobs.Service) {
-	m.jobsSvc = svc
-}
-
-// SetTagsService sets the tags service.
-func (m *Materializer) SetTagsService(svc *tags.Service) {
-	m.tagsSvc = svc
+	if deps.StorageService == nil {
+		panic("runner.NewMaterializer: StorageService is required")
+	}
+	if deps.ImageService == nil {
+		panic("runner.NewMaterializer: ImageService is required")
+	}
+	if deps.JobsService == nil {
+		panic("runner.NewMaterializer: JobsService is required")
+	}
+	return &Materializer{
+		logger:     deps.Logger,
+		storageSvc: deps.StorageService,
+		imageSvc:   deps.ImageService,
+		jobsSvc:    deps.JobsService,
+		tagsSvc:    deps.TagsService,
+	}
 }
 
 // MaterializeImage processes source image metadata and materializes to eligible devices.
@@ -348,9 +352,7 @@ func (m *Materializer) MaterializeImage(ctx context.Context, req MaterializeRequ
 	}
 
 	// Final counter update
-	if m.jobsSvc != nil {
-		m.updateJobCounters(ctx, req.JobID, result)
-	}
+	m.updateJobCounters(ctx, req.JobID, result)
 
 	m.logger.Info("materialization complete",
 		"processed", processedCount,
@@ -366,10 +368,6 @@ func (m *Materializer) MaterializeImage(ctx context.Context, req MaterializeRequ
 
 // isBlacklisted checks if an image is blacklisted for a source.
 func (m *Materializer) isBlacklisted(ctx context.Context, sourceID dbtypes.UUID, uniqueID string) (bool, error) {
-	if m.imageSvc == nil {
-		return false, nil
-	}
-
 	var count struct {
 		Count int64 `alias:"count"`
 	}
@@ -507,10 +505,6 @@ func ptrFloat64(v float64) *float64 {
 // If thumbnail already exists on disk, it will be regenerated.
 // Thumbnail failures are logged but do not fail the operation.
 func (m *Materializer) ensureThumbnail(ctx context.Context, imageID dbtypes.UUID, sourcePath string) error {
-	if m.storageSvc == nil || m.imageSvc == nil {
-		return nil
-	}
-
 	// Check if thumbnail already exists in DB
 	existing, err := m.imageSvc.GetImageThumbnail(ctx, imageID)
 	if err != nil && !errors.Is(err, images.ErrThumbnailNotFound) {
