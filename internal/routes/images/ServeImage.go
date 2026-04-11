@@ -14,7 +14,7 @@ import (
 // ServeImageInput describes the request body for ServeImage.
 type ServeImageInput struct {
 	Body struct {
-		ImageID  dbtypes.UUID  `json:"image_id" doc:"Image ID"`
+		ImageID  dbtypes.UUID  `json:"image_id" required:"true" doc:"Image ID"`
 		DeviceID *dbtypes.UUID `json:"device_id,omitempty" doc:"Optional device ID to get device-specific location"`
 	}
 }

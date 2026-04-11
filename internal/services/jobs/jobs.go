@@ -101,7 +101,7 @@ type ListJobsResponse struct {
 }
 
 type GetJobRequest struct {
-	ID dbtypes.UUID `json:"id" doc:"Job ID."`
+	ID dbtypes.UUID `json:"id" required:"true" doc:"Job ID."`
 }
 
 type StartJobRequest struct {

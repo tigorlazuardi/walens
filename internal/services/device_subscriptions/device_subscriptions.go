@@ -23,23 +23,26 @@ var ErrDuplicateSubscription = errors.New("device is already subscribed to this 
 type SubscriptionRow = model.DeviceSourceSubscriptions
 
 type CreateSubscriptionRequest struct {
-	DeviceID  string `json:"device_id" doc:"Reference to the device to subscribe."`
-	SourceID  string `json:"source_id" doc:"Reference to the source to subscribe to."`
-	IsEnabled bool   `json:"is_enabled" doc:"Whether this subscription is active."`
+	DeviceID  string `json:"device_id" required:"true" doc:"Reference to the device to subscribe."`
+	SourceID  string `json:"source_id" required:"true" doc:"Reference to the source to subscribe to."`
+	IsEnabled bool   `json:"is_enabled" required:"true" doc:"Whether this subscription is active."`
 }
 
 type CreateSubscriptionResponse = model.DeviceSourceSubscriptions
 
 type UpdateSubscriptionRequest struct {
-	ID        string `json:"id" doc:"Unique subscription identifier."`
-	DeviceID  string `json:"device_id" doc:"Reference to the device."`
-	SourceID  string `json:"source_id" doc:"Reference to the source."`
-	IsEnabled bool   `json:"is_enabled" doc:"Whether this subscription is active."`
+	ID        string `json:"id" required:"true" doc:"Unique subscription identifier."`
+	DeviceID  string `json:"device_id" required:"true" doc:"Reference to the device."`
+	SourceID  string `json:"source_id" required:"true" doc:"Reference to the source."`
+	IsEnabled bool   `json:"is_enabled" required:"true" doc:"Whether this subscription is active."`
 }
 
 type UpdateSubscriptionResponse = model.DeviceSourceSubscriptions
 
 type ListSubscriptionsRequest struct {
+	DeviceIDs  []dbtypes.UUID                   `json:"device_ids" doc:"Filter by device IDs (subsets of all matching subscriptions)"`
+	SourceIDs  []dbtypes.UUID                   `json:"source_ids" doc:"Filter by source IDs (subsets of all matching subscriptions)"`
+	Search     *string                          `json:"search" doc:"Search by device name or source name"`
 	Pagination *dbtypes.CursorPaginationRequest `json:"pagination,omitempty"`
 }
 
@@ -56,7 +59,7 @@ type GetSubscriptionRequest struct {
 type GetSubscriptionResponse = model.DeviceSourceSubscriptions
 
 type DeleteSubscriptionRequest struct {
-	ID dbtypes.UUID `json:"id" doc:"Unique subscription identifier."`
+	ID dbtypes.UUID `json:"id" required:"true" doc:"Unique subscription identifier."`
 }
 
 type DeleteSubscriptionResponse struct{}
@@ -102,16 +105,51 @@ func (s *Service) ListSubscriptions(ctx context.Context, req ListSubscriptionsRe
 	var items []model.DeviceSourceSubscriptions
 	baseCond := Bool(true)
 
+	// Filter by device IDs using IN expression
+	if len(req.DeviceIDs) > 0 {
+		deviceIDExprs := make([]Expression, len(req.DeviceIDs))
+		for i, d := range req.DeviceIDs {
+			deviceIDExprs[i] = String(d.UUID.String())
+		}
+		baseCond = baseCond.AND(DeviceSourceSubscriptions.DeviceID.IN(deviceIDExprs...))
+	}
+
+	// Filter by source IDs using IN expression
+	if len(req.SourceIDs) > 0 {
+		sourceIDExprs := make([]Expression, len(req.SourceIDs))
+		for i, src := range req.SourceIDs {
+			sourceIDExprs[i] = String(src.UUID.String())
+		}
+		baseCond = baseCond.AND(DeviceSourceSubscriptions.SourceID.IN(sourceIDExprs...))
+	}
+
+	// Filter by search term matching device name or source name
+	if req.Search != nil && *req.Search != "" {
+		pattern := String("%" + *req.Search + "%")
+		searchSubquery := SELECT(DeviceSourceSubscriptions.ID).
+			FROM(DeviceSourceSubscriptions.
+				INNER_JOIN(Devices, DeviceSourceSubscriptions.DeviceID.EQ(Devices.ID)).
+				INNER_JOIN(Sources, DeviceSourceSubscriptions.SourceID.EQ(Sources.ID))).
+			WHERE(Devices.Name.LIKE(pattern).OR(Sources.Name.LIKE(pattern)))
+		baseCond = baseCond.AND(DeviceSourceSubscriptions.ID.IN(searchSubquery))
+	}
+
 	// Get total count before pagination filters
 	total, err := s.countSubscriptions(ctx, baseCond)
 	if err != nil {
 		return ListSubscriptionsResponse{}, err
 	}
 
-	// Pagination - build condition with cursor filters
+	// Pagination - use zero-value if omitted so methods don't panic
+	pagination := dbtypes.CursorPaginationRequest{}
+	if req.Pagination != nil {
+		pagination = *req.Pagination
+	}
+
+	// Build condition with cursor filters
 	cond := baseCond
-	next := req.Pagination.NextToken()
-	prev := req.Pagination.PrevToken()
+	next := pagination.NextToken()
+	prev := pagination.PrevToken()
 	isPrev := next == "" && prev != ""
 	if next != "" {
 		cond = cond.AND(DeviceSourceSubscriptions.ID.GT(String(next)))
@@ -120,7 +158,7 @@ func (s *Service) ListSubscriptions(ctx context.Context, req ListSubscriptionsRe
 		cond = cond.AND(DeviceSourceSubscriptions.ID.LT(String(prev)))
 	}
 
-	orderBy, err := req.Pagination.BuildOrderByClause(DeviceSourceSubscriptions.AllColumns)
+	orderBy, err := pagination.BuildOrderByClause(DeviceSourceSubscriptions.AllColumns)
 	if err != nil {
 		return ListSubscriptionsResponse{}, err
 	}
@@ -133,13 +171,13 @@ func (s *Service) ListSubscriptions(ctx context.Context, req ListSubscriptionsRe
 		orderBy = append(orderBy, DeviceSourceSubscriptions.ID.ASC())
 	}
 
-	limit := req.Pagination.GetLimitOrDefault(20, 100)
+	limit := pagination.GetLimitOrDefault(20, 100)
 	stmt := SELECT(DeviceSourceSubscriptions.AllColumns).
 		FROM(DeviceSourceSubscriptions).
 		WHERE(cond).
 		ORDER_BY(orderBy...).
 		LIMIT(limit + 1).
-		OFFSET(req.Pagination.GetOffset())
+		OFFSET(pagination.GetOffset())
 	if err := stmt.QueryContext(ctx, s.db, &items); err != nil {
 		return ListSubscriptionsResponse{}, huma.Error500InternalServerError("failed to list device subscriptions", err)
 	}

@@ -13,7 +13,7 @@ import (
 )
 
 type GetSourceRequest struct {
-	ID dbtypes.UUID `json:"id" doc:"Unique source identifier."`
+	ID dbtypes.UUID `json:"id" required:"true" doc:"Unique source identifier."`
 }
 
 type GetSourceResponse = model.Sources

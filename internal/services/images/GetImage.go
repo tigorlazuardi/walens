@@ -14,7 +14,7 @@ import (
 
 // GetImageInput defines the input for GetImage.
 type GetImageInput struct {
-	ID dbtypes.UUID `json:"id" doc:"Image ID"`
+	ID dbtypes.UUID `json:"id" required:"true" doc:"Image ID"`
 }
 
 // GetImage retrieves an image by its ID.

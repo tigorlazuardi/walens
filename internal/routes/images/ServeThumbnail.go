@@ -14,7 +14,7 @@ import (
 // ServeThumbnailInput describes the request body for ServeThumbnail.
 type ServeThumbnailInput struct {
 	Body struct {
-		ImageID dbtypes.UUID `json:"image_id" doc:"Image ID"`
+		ImageID dbtypes.UUID `json:"image_id" required:"true" doc:"Image ID"`
 	}
 }
 

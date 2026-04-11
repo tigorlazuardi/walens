@@ -16,7 +16,7 @@ import (
 
 // DeleteImageInput defines the input for DeleteImage.
 type DeleteImageInput struct {
-	ID dbtypes.UUID `json:"id" doc:"Image ID to delete"`
+	ID dbtypes.UUID `json:"id" required:"true" doc:"Image ID to delete"`
 }
 
 // DeleteImageResponse describes the result of a delete operation.

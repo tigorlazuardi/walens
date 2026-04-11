@@ -26,7 +26,7 @@ func GetImageThumbnailOperation(basePath string) huma.Operation {
 // GetImageThumbnailInput describes the request body for GetImageThumbnail.
 type GetImageThumbnailInput struct {
 	Body struct {
-		ImageID dbtypes.UUID `json:"image_id" doc:"Image ID"`
+		ImageID dbtypes.UUID `json:"image_id" required:"true" doc:"Image ID"`
 	}
 }
 

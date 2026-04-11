@@ -7,8 +7,8 @@ import (
 )
 
 type UpdateConfigRequest struct {
-	DataDir  string `json:"data_dir" doc:"Directory for storing application data."`
-	LogLevel string `json:"log_level" doc:"Logging level (debug, info, warn, error)."`
+	DataDir  string `json:"data_dir" required:"true" doc:"Directory for storing application data."`
+	LogLevel string `json:"log_level" required:"true" doc:"Logging level (debug, info, warn, error)."`
 }
 
 type UpdateConfigResponse = PersistedConfig

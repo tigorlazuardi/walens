@@ -13,11 +13,11 @@ import (
 )
 
 type CreateSourceRequest struct {
-	Name        string          `json:"name" doc:"Unique human-readable source name."`
-	SourceType  string          `json:"source_type" doc:"Registered source implementation name (e.g., booru, reddit)."`
-	Params      json.RawMessage `json:"params" doc:"Source-specific configuration as JSON."`
-	LookupCount int64           `json:"lookup_count" doc:"Upstream lookup budget per run (0 = use source default)."`
-	IsEnabled   bool            `json:"is_enabled" doc:"Whether this source is active."`
+	Name        string          `json:"name" required:"true" doc:"Unique human-readable source name."`
+	SourceType  string          `json:"source_type" required:"true" doc:"Registered source implementation name (e.g., booru, reddit)."`
+	Params      json.RawMessage `json:"params" required:"true" doc:"Source-specific configuration as JSON."`
+	LookupCount int64           `json:"lookup_count" required:"true" doc:"Upstream lookup budget per run (0 = use source default)."`
+	IsEnabled   bool            `json:"is_enabled" required:"true" doc:"Whether this source is active."`
 }
 
 type CreateSourceResponse = model.Sources

@@ -26,7 +26,7 @@ func GetSourceTypeOperation(basePath string) huma.Operation {
 // GetSourceTypeInput describes the request body for GetSourceType.
 type GetSourceTypeInput struct {
 	Body struct {
-		TypeName string `json:"type_name" doc:"The source type implementation name (e.g., 'booru')."`
+		TypeName string `json:"type_name" required:"true" doc:"The source type implementation name (e.g., 'booru')."`
 	}
 }
 

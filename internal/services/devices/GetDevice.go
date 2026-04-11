@@ -13,7 +13,7 @@ import (
 )
 
 type GetDeviceRequest struct {
-	ID dbtypes.UUID `json:"id" doc:"unique identifier of the device"`
+	ID dbtypes.UUID `json:"id" required:"true" doc:"unique identifier of the device"`
 }
 
 type GetDeviceResponse = model.Devices

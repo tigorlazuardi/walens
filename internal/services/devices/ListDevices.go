@@ -13,7 +13,7 @@ import (
 
 type ListDevicesRequest struct {
 	Search     *string                          `json:"search" doc:"Search devices by name or slug"`
-	Pagination *dbtypes.CursorPaginationRequest `json:"pagination"`
+	Pagination *dbtypes.CursorPaginationRequest `json:"pagination,omitempty"`
 }
 
 type ListDevicesResponse struct {

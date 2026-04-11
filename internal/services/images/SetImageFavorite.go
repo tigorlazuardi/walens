@@ -14,8 +14,8 @@ import (
 
 // SetImageFavoriteInput defines the input for SetImageFavorite.
 type SetImageFavoriteInput struct {
-	ID         dbtypes.UUID `json:"id" doc:"Image ID"`
-	IsFavorite bool         `json:"is_favorite" doc:"Whether the image should be marked as favorite"`
+	ID         dbtypes.UUID `json:"id" required:"true" doc:"Image ID"`
+	IsFavorite bool         `json:"is_favorite" required:"true" doc:"Whether the image should be marked as favorite"`
 }
 
 // SetImageFavoriteOutput defines the output for SetImageFavorite.

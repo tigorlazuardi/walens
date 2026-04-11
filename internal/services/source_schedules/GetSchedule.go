@@ -13,7 +13,7 @@ import (
 )
 
 type GetScheduleRequest struct {
-	ID dbtypes.UUID `json:"id" doc:"Unique source schedule identifier."`
+	ID dbtypes.UUID `json:"id" required:"true" doc:"Unique source schedule identifier."`
 }
 
 type GetScheduleResponse = model.SourceSchedules

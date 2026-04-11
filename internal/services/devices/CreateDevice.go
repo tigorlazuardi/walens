@@ -12,19 +12,19 @@ import (
 )
 
 type CreateDeviceRequest struct {
-	Name                 string  `json:"name" doc:"Human-readable device name."`
-	Slug                 string  `json:"slug" doc:"URL-safe device identifier for paths (lowercase letters, numbers, hyphens only)."`
-	ScreenWidth          int64   `json:"screen_width" doc:"Device screen width in pixels."`
-	ScreenHeight         int64   `json:"screen_height" doc:"Device screen height in pixels."`
-	MinImageWidth        int64   `json:"min_image_width" doc:"Minimum image width filter in pixels (0 = no limit)."`
-	MaxImageWidth        int64   `json:"max_image_width" doc:"Maximum image width filter in pixels (0 = no limit)."`
-	MinImageHeight       int64   `json:"min_image_height" doc:"Minimum image height filter in pixels (0 = no limit)."`
-	MaxImageHeight       int64   `json:"max_image_height" doc:"Maximum image height filter in pixels (0 = no limit)."`
-	MinFilesize          int64   `json:"min_filesize" doc:"Minimum file size filter in bytes (0 = no limit)."`
-	MaxFilesize          int64   `json:"max_filesize" doc:"Maximum file size filter in bytes (0 = no limit)."`
-	IsAdultAllowed       bool    `json:"is_adult_allowed" doc:"Whether adult content is allowed for this device."`
-	IsEnabled            bool    `json:"is_enabled" doc:"Whether the device is active and receiving wallpapers."`
-	AspectRatioTolerance float64 `json:"aspect_ratio_tolerance" doc:"Absolute aspect ratio tolerance for matching wallpapers (0-1)."`
+	Name                 string  `json:"name" required:"true" doc:"Human-readable device name."`
+	Slug                 string  `json:"slug" required:"true" doc:"URL-safe device identifier for paths (lowercase letters, numbers, hyphens only)."`
+	ScreenWidth          int64   `json:"screen_width" required:"true" doc:"Device screen width in pixels."`
+	ScreenHeight         int64   `json:"screen_height" required:"true" doc:"Device screen height in pixels."`
+	MinImageWidth        int64   `json:"min_image_width" required:"true" doc:"Minimum image width filter in pixels (0 = no limit)."`
+	MaxImageWidth        int64   `json:"max_image_width" required:"true" doc:"Maximum image width filter in pixels (0 = no limit)."`
+	MinImageHeight       int64   `json:"min_image_height" required:"true" doc:"Minimum image height filter in pixels (0 = no limit)."`
+	MaxImageHeight       int64   `json:"max_image_height" required:"true" doc:"Maximum image height filter in pixels (0 = no limit)."`
+	MinFilesize          int64   `json:"min_filesize" required:"true" doc:"Minimum file size filter in bytes (0 = no limit)."`
+	MaxFilesize          int64   `json:"max_filesize" required:"true" doc:"Maximum file size filter in bytes (0 = no limit)."`
+	IsAdultAllowed       bool    `json:"is_adult_allowed" required:"true" doc:"Whether adult content is allowed for this device."`
+	IsEnabled            bool    `json:"is_enabled" required:"true" doc:"Whether the device is active and receiving wallpapers."`
+	AspectRatioTolerance float64 `json:"aspect_ratio_tolerance" required:"true" doc:"Absolute aspect ratio tolerance for matching wallpapers (0-1)."`
 }
 
 type CreateDeviceResponse = model.Devices

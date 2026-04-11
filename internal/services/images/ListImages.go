@@ -25,7 +25,7 @@ type ListImagesRequest struct {
 	MaxFileSizeBytes *int64                           `json:"max_file_size_bytes" doc:"Maximum file size in bytes"`
 	Search           *string                          `json:"search" doc:"Search uploader, artist, origin URL, source item identifier, and tags"`
 	SourceIDs        []dbtypes.UUID                   `json:"source_ids" doc:"Filter by source IDs"`
-	Pagination       *dbtypes.CursorPaginationRequest `json:"pagination"`
+	Pagination       *dbtypes.CursorPaginationRequest `json:"pagination,omitempty"`
 }
 
 // ListImagesResponse returns the paginated list of images.

@@ -13,12 +13,12 @@ import (
 )
 
 type UpdateSourceRequest struct {
-	ID          dbtypes.UUID     `json:"id" doc:"Unique source identifier."`
-	Name        *string          `json:"name,omitempty" doc:"Unique human-readable source name."`
-	SourceType  *string          `json:"source_type,omitempty" doc:"Registered source implementation name."`
-	Params      *json.RawMessage `json:"params,omitempty" doc:"Source-specific configuration as JSON."`
-	LookupCount *int64           `json:"lookup_count,omitempty" doc:"Upstream lookup budget per run (0 = use source default)."`
-	IsEnabled   *bool            `json:"is_enabled,omitempty" doc:"Whether this source is active."`
+	ID          dbtypes.UUID     `json:"id" required:"true" doc:"Unique source identifier."`
+	Name        *string          `json:"name,omitempty" required:"true" doc:"Unique human-readable source name."`
+	SourceType  *string          `json:"source_type,omitempty" required:"true" doc:"Registered source implementation name."`
+	Params      *json.RawMessage `json:"params,omitempty" required:"true" doc:"Source-specific configuration as JSON."`
+	LookupCount *int64           `json:"lookup_count,omitempty" required:"true" doc:"Upstream lookup budget per run (0 = use source default)."`
+	IsEnabled   *bool            `json:"is_enabled,omitempty" required:"true" doc:"Whether this source is active."`
 }
 
 type UpdateSourceResponse = model.Sources

@@ -14,7 +14,7 @@ import (
 
 // BlacklistImageInput defines the input for BlacklistImage.
 type BlacklistImageInput struct {
-	ImageID dbtypes.UUID `json:"image_id" doc:"Image ID to blacklist"`
+	ImageID dbtypes.UUID `json:"image_id" required:"true" doc:"Image ID to blacklist"`
 	Reason  *string      `json:"reason" doc:"Optional reason for blacklisting"`
 }
 

@@ -17,7 +17,7 @@ import (
 
 // ListDeviceImagesRequest describes filters for listing images for a specific device.
 type ListDeviceImagesRequest struct {
-	DeviceID         dbtypes.UUID                     `json:"device_id" doc:"Device ID to match images for"`
+	DeviceID         dbtypes.UUID                     `json:"device_id" required:"true" doc:"Device ID to match images for"`
 	Adult            *bool                            `json:"adult" doc:"Filter by adult flag"`
 	Favorite         *bool                            `json:"favorite" doc:"Filter by favorite flag"`
 	MinWidth         *int64                           `json:"min_width" doc:"Minimum image width in pixels"`
@@ -27,7 +27,7 @@ type ListDeviceImagesRequest struct {
 	MinFileSizeBytes *int64                           `json:"min_file_size_bytes" doc:"Minimum file size in bytes"`
 	MaxFileSizeBytes *int64                           `json:"max_file_size_bytes" doc:"Maximum file size in bytes"`
 	Search           *string                          `json:"search" doc:"Search uploader, artist, origin URL, source item identifier, and tags"`
-	Pagination       *dbtypes.CursorPaginationRequest `json:"pagination"`
+	Pagination       *dbtypes.CursorPaginationRequest `json:"pagination,omitempty"`
 }
 
 // ListDeviceImagesResponse returns the paginated list of images for a device.

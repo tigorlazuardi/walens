@@ -14,8 +14,8 @@ func ListDeviceSubscriptionsOperation(basePath string) huma.Operation {
 		OperationID: "ListDeviceSubscriptions",
 		Method:      "POST",
 		Path:        path.Join(basePath, "/api/v1/device_subscriptions/ListDeviceSubscriptions"),
-		Summary:     "List all device subscriptions",
-		Description: "Returns all device source subscription rows, ordered by creation time.",
+		Summary:     "List device subscriptions",
+		Description: "Returns device source subscription rows, optionally filtered by device IDs, source IDs, and search term (matches device name or source name). Ordered by creation time.",
 		Tags:        []string{"Device Subscriptions"},
 	}
 }
@@ -31,7 +31,7 @@ type ListDeviceSubscriptionsOutput struct {
 }
 
 // ListDeviceSubscriptions handles POST /api/v1/device_subscriptions/ListDeviceSubscriptions.
-// Returns all device source subscription rows.
+// Returns device source subscription rows, optionally filtered by device IDs, source IDs, and search term.
 func ListDeviceSubscriptions(ctx context.Context, input *ListDeviceSubscriptionsInput, svc *subsvc.Service) (*ListDeviceSubscriptionsOutput, error) {
 	resp, err := svc.ListSubscriptions(ctx, input.Body)
 	if err != nil {

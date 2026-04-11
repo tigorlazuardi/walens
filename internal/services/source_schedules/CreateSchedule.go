@@ -10,9 +10,9 @@ import (
 )
 
 type CreateScheduleRequest struct {
-	SourceID  dbtypes.UUID `json:"source_id" doc:"Reference to the parent source."`
-	CronExpr  string       `json:"cron_expr" doc:"Cron expression (5-field, minute hour day month weekday)."`
-	IsEnabled bool         `json:"is_enabled" doc:"Whether this schedule is active."`
+	SourceID  dbtypes.UUID `json:"source_id" required:"true" doc:"Reference to the parent source."`
+	CronExpr  string       `json:"cron_expr" required:"true" doc:"Cron expression (5-field, minute hour day month weekday)."`
+	IsEnabled bool         `json:"is_enabled" required:"true" doc:"Whether this schedule is active."`
 }
 
 type CreateScheduleResponse struct {
