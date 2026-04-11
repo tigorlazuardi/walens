@@ -60,6 +60,12 @@
     const source = (sourcesQuery.data?.items ?? []).find((s) => s.id === sourceId);
     return source?.name || sourceId;
   }
+
+  function handleCreateDialogKeydown(event: KeyboardEvent) {
+    if (event.key === 'Escape') {
+      showCreate = false;
+    }
+  }
 </script>
 
 <div class="space-y-4">
@@ -78,9 +84,9 @@
         <Card class="p-4">
           {#if editingSchedule === schedule.id}
             <form class="space-y-4" onsubmit={handleUpdate}>
-              <div class="space-y-2"><label class="text-sm font-medium">Source</label><Select bind:value={formSourceId}>{#if sourcesQuery.data}{#each sourcesQuery.data.items as source}<option value={source.id}>{source.name}</option>{/each}{/if}</Select></div>
-              <div class="space-y-2"><label class="text-sm font-medium">Cron Expression</label><Input bind:value={formCron} required placeholder="* * * * *" /></div>
-              <label class="flex items-center gap-2 text-sm text-slate-700"><Checkbox bind:checked={formEnabled} />Enabled</label>
+              <div class="space-y-2"><label for={`schedule-${schedule.id}-source`} class="text-sm font-medium">Source</label><Select id={`schedule-${schedule.id}-source`} bind:value={formSourceId}>{#if sourcesQuery.data}{#each sourcesQuery.data.items as source}<option value={source.id}>{source.name}</option>{/each}{/if}</Select></div>
+              <div class="space-y-2"><label for={`schedule-${schedule.id}-cron`} class="text-sm font-medium">Cron Expression</label><Input id={`schedule-${schedule.id}-cron`} bind:value={formCron} required placeholder="* * * * *" /></div>
+              <div class="flex items-center gap-2 text-sm text-slate-700"><Checkbox id={`schedule-${schedule.id}-enabled`} bind:checked={formEnabled} /><label for={`schedule-${schedule.id}-enabled`}>Enabled</label></div>
               <div class="flex justify-end gap-2"><Button type="button" variant="outline" onclick={cancelEdit}>Cancel</Button><Button type="submit">Save</Button></div>
             </form>
           {:else}
@@ -99,16 +105,19 @@
   {/if}
 
   {#if showCreate}
-    <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" role="dialog" aria-modal="true" onclick={() => { showCreate = false; }}>
-      <Card class="w-full max-w-lg p-5" onclick={(e) => e.stopPropagation()}>
-        <h2 class="text-lg font-semibold">Add Schedule</h2>
+    <div class="fixed inset-0 z-50">
+      <button type="button" class="absolute inset-0 bg-black/50" aria-label="Close dialog" onclick={() => { showCreate = false; }}></button>
+      <div class="relative z-10 flex min-h-full items-center justify-center p-4" role="dialog" tabindex="-1" aria-modal="true" aria-labelledby="schedule-create-title" onkeydown={handleCreateDialogKeydown}>
+      <Card class="w-full max-w-lg p-5">
+        <h2 id="schedule-create-title" class="text-lg font-semibold">Add Schedule</h2>
         <form class="mt-4 space-y-4" onsubmit={handleCreate}>
-          <div class="space-y-2"><label class="text-sm font-medium">Source</label><Select bind:value={formSourceId}>{#if sourcesQuery.data}{#each sourcesQuery.data.items as source}<option value={source.id}>{source.name}</option>{/each}{:else}<option value="">Loading sources...</option>{/if}</Select></div>
-          <div class="space-y-2"><label class="text-sm font-medium">Cron Expression</label><Input bind:value={formCron} required placeholder="* * * * *" /><span class="text-xs text-slate-500">Format: minute hour day month weekday</span></div>
-          <label class="flex items-center gap-2 text-sm text-slate-700"><Checkbox bind:checked={formEnabled} />Enabled</label>
+          <div class="space-y-2"><label for="schedule-create-source" class="text-sm font-medium">Source</label><Select id="schedule-create-source" bind:value={formSourceId}>{#if sourcesQuery.data}{#each sourcesQuery.data.items as source}<option value={source.id}>{source.name}</option>{/each}{:else}<option value="">Loading sources...</option>{/if}</Select></div>
+          <div class="space-y-2"><label for="schedule-create-cron" class="text-sm font-medium">Cron Expression</label><Input id="schedule-create-cron" bind:value={formCron} required placeholder="* * * * *" /><span class="text-xs text-slate-500">Format: minute hour day month weekday</span></div>
+          <div class="flex items-center gap-2 text-sm text-slate-700"><Checkbox id="schedule-create-enabled" bind:checked={formEnabled} /><label for="schedule-create-enabled">Enabled</label></div>
           <div class="flex justify-end gap-2"><Button type="button" variant="outline" onclick={() => { showCreate = false; }}>Cancel</Button><Button type="submit">Create</Button></div>
         </form>
       </Card>
+      </div>
     </div>
   {/if}
 </div>

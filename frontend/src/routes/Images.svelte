@@ -57,8 +57,8 @@
   <div class="flex flex-wrap items-center justify-between gap-3">
     <h1 class="text-2xl font-semibold tracking-tight">Images</h1>
     <div class="flex flex-wrap items-center gap-3">
-      <label class="flex items-center gap-2 text-sm text-slate-600">
-        <Checkbox bind:checked={favoritesOnly} />
+      <label for="favorites-only" class="flex items-center gap-2 text-sm text-slate-600">
+        <Checkbox id="favorites-only" bind:checked={favoritesOnly} />
         Favorites only
       </label>
       <Input class="w-56" placeholder="Search..." bind:value={searchQuery} />

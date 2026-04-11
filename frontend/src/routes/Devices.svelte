@@ -122,6 +122,12 @@
       await deleteMutation.mutateAsync(id);
     }
   }
+
+  function handleCreateDialogKeydown(event: KeyboardEvent) {
+    if (event.key === 'Escape') {
+      showCreate = false;
+    }
+  }
 </script>
 
 <div class="space-y-4">
@@ -141,37 +147,37 @@
           {#if editingDevice === device.id}
             <form class="space-y-4" onsubmit={handleUpdate}>
               <div class="space-y-2">
-                <label class="text-sm font-medium">Name</label>
-                <Input bind:value={formName} onblur={() => { if (!formSlug) generateSlug(formName); }} required />
+                <label for={`device-${device.id}-name`} class="text-sm font-medium">Name</label>
+                <Input id={`device-${device.id}-name`} bind:value={formName} onblur={() => { if (!formSlug) generateSlug(formName); }} required />
               </div>
               <div class="space-y-2">
-                <label class="text-sm font-medium">Slug</label>
-                <Input bind:value={formSlug} pattern="[a-z0-9-]+" required />
+                <label for={`device-${device.id}-slug`} class="text-sm font-medium">Slug</label>
+                <Input id={`device-${device.id}-slug`} bind:value={formSlug} pattern="[a-z0-9-]+" required />
               </div>
               <div class="grid grid-cols-2 gap-3">
-                <div class="space-y-2"><label class="text-sm font-medium">Screen Width</label><Input type="number" bind:value={formWidth} min="1" required /></div>
-                <div class="space-y-2"><label class="text-sm font-medium">Screen Height</label><Input type="number" bind:value={formHeight} min="1" required /></div>
+                <div class="space-y-2"><label for={`device-${device.id}-width`} class="text-sm font-medium">Screen Width</label><Input id={`device-${device.id}-width`} type="number" bind:value={formWidth} min="1" required /></div>
+                <div class="space-y-2"><label for={`device-${device.id}-height`} class="text-sm font-medium">Screen Height</label><Input id={`device-${device.id}-height`} type="number" bind:value={formHeight} min="1" required /></div>
               </div>
               <details class="rounded-lg border border-slate-200 p-3">
                 <summary class="cursor-pointer text-sm font-medium text-slate-600">Advanced</summary>
                 <div class="mt-3 space-y-3">
                   <div class="grid grid-cols-2 gap-3">
-                    <Input type="number" bind:value={formMinWidth} min="0" placeholder="Min Width" />
-                    <Input type="number" bind:value={formMaxWidth} min="0" placeholder="Max Width" />
+                    <Input id={`device-${device.id}-min-width`} type="number" bind:value={formMinWidth} min="0" placeholder="Min Width" />
+                    <Input id={`device-${device.id}-max-width`} type="number" bind:value={formMaxWidth} min="0" placeholder="Max Width" />
                   </div>
                   <div class="grid grid-cols-2 gap-3">
-                    <Input type="number" bind:value={formMinHeight} min="0" placeholder="Min Height" />
-                    <Input type="number" bind:value={formMaxHeight} min="0" placeholder="Max Height" />
+                    <Input id={`device-${device.id}-min-height`} type="number" bind:value={formMinHeight} min="0" placeholder="Min Height" />
+                    <Input id={`device-${device.id}-max-height`} type="number" bind:value={formMaxHeight} min="0" placeholder="Max Height" />
                   </div>
                   <div class="grid grid-cols-2 gap-3">
-                    <Input type="number" bind:value={formMinFilesize} min="0" placeholder="Min Filesize" />
-                    <Input type="number" bind:value={formMaxFilesize} min="0" placeholder="Max Filesize" />
+                    <Input id={`device-${device.id}-min-filesize`} type="number" bind:value={formMinFilesize} min="0" placeholder="Min Filesize" />
+                    <Input id={`device-${device.id}-max-filesize`} type="number" bind:value={formMaxFilesize} min="0" placeholder="Max Filesize" />
                   </div>
-                  <Input type="number" bind:value={formAspectTolerance} min="0" step="0.01" placeholder="Aspect Ratio Tolerance" />
+                  <Input id={`device-${device.id}-aspect-tolerance`} type="number" bind:value={formAspectTolerance} min="0" step="0.01" placeholder="Aspect Ratio Tolerance" />
                 </div>
               </details>
-              <label class="flex items-center gap-2 text-sm text-slate-700"><Checkbox bind:checked={formAdultAllowed} />Allow Adult Content</label>
-              <label class="flex items-center gap-2 text-sm text-slate-700"><Checkbox bind:checked={formEnabled} />Enabled</label>
+              <div class="flex items-center gap-2 text-sm text-slate-700"><Checkbox id={`device-${device.id}-adult-allowed`} bind:checked={formAdultAllowed} /><label for={`device-${device.id}-adult-allowed`}>Allow Adult Content</label></div>
+              <div class="flex items-center gap-2 text-sm text-slate-700"><Checkbox id={`device-${device.id}-enabled`} bind:checked={formEnabled} /><label for={`device-${device.id}-enabled`}>Enabled</label></div>
               <div class="flex justify-end gap-2">
                 <Button type="button" variant="outline" onclick={cancelEdit}>Cancel</Button>
                 <Button type="submit">Save</Button>
@@ -204,33 +210,36 @@
   {/if}
 
   {#if showCreate}
-    <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" role="dialog" aria-modal="true" onclick={() => { showCreate = false; }}>
-      <Card class="w-full max-w-lg p-5" onclick={(e) => e.stopPropagation()}>
-        <h2 class="text-lg font-semibold">Add Device</h2>
+    <div class="fixed inset-0 z-50">
+      <button type="button" class="absolute inset-0 bg-black/50" aria-label="Close dialog" onclick={() => { showCreate = false; }}></button>
+      <div class="relative z-10 flex min-h-full items-center justify-center p-4" role="dialog" tabindex="-1" aria-modal="true" aria-labelledby="device-create-title" onkeydown={handleCreateDialogKeydown}>
+      <Card class="w-full max-w-lg p-5">
+        <h2 id="device-create-title" class="text-lg font-semibold">Add Device</h2>
         <form class="mt-4 space-y-4" onsubmit={handleCreate}>
-          <div class="space-y-2"><label class="text-sm font-medium">Name</label><Input bind:value={formName} onblur={() => { if (!formSlug) generateSlug(formName); }} required /></div>
-          <div class="space-y-2"><label class="text-sm font-medium">Slug</label><Input bind:value={formSlug} pattern="[a-z0-9-]+" required /></div>
+          <div class="space-y-2"><label for="device-create-name" class="text-sm font-medium">Name</label><Input id="device-create-name" bind:value={formName} onblur={() => { if (!formSlug) generateSlug(formName); }} required /></div>
+          <div class="space-y-2"><label for="device-create-slug" class="text-sm font-medium">Slug</label><Input id="device-create-slug" bind:value={formSlug} pattern="[a-z0-9-]+" required /></div>
           <div class="grid grid-cols-2 gap-3">
-            <div class="space-y-2"><label class="text-sm font-medium">Screen Width</label><Input type="number" bind:value={formWidth} min="1" required /></div>
-            <div class="space-y-2"><label class="text-sm font-medium">Screen Height</label><Input type="number" bind:value={formHeight} min="1" required /></div>
+            <div class="space-y-2"><label for="device-create-width" class="text-sm font-medium">Screen Width</label><Input id="device-create-width" type="number" bind:value={formWidth} min="1" required /></div>
+            <div class="space-y-2"><label for="device-create-height" class="text-sm font-medium">Screen Height</label><Input id="device-create-height" type="number" bind:value={formHeight} min="1" required /></div>
           </div>
           <details class="rounded-lg border border-slate-200 p-3">
             <summary class="cursor-pointer text-sm font-medium text-slate-600">Advanced</summary>
             <div class="mt-3 space-y-3">
-              <div class="grid grid-cols-2 gap-3"><Input type="number" bind:value={formMinWidth} min="0" placeholder="Min Width" /><Input type="number" bind:value={formMaxWidth} min="0" placeholder="Max Width" /></div>
-              <div class="grid grid-cols-2 gap-3"><Input type="number" bind:value={formMinHeight} min="0" placeholder="Min Height" /><Input type="number" bind:value={formMaxHeight} min="0" placeholder="Max Height" /></div>
-              <div class="grid grid-cols-2 gap-3"><Input type="number" bind:value={formMinFilesize} min="0" placeholder="Min Filesize" /><Input type="number" bind:value={formMaxFilesize} min="0" placeholder="Max Filesize" /></div>
-              <Input type="number" bind:value={formAspectTolerance} min="0" step="0.01" placeholder="Aspect Ratio Tolerance" />
+              <div class="grid grid-cols-2 gap-3"><Input id="device-create-min-width" type="number" bind:value={formMinWidth} min="0" placeholder="Min Width" /><Input id="device-create-max-width" type="number" bind:value={formMaxWidth} min="0" placeholder="Max Width" /></div>
+              <div class="grid grid-cols-2 gap-3"><Input id="device-create-min-height" type="number" bind:value={formMinHeight} min="0" placeholder="Min Height" /><Input id="device-create-max-height" type="number" bind:value={formMaxHeight} min="0" placeholder="Max Height" /></div>
+              <div class="grid grid-cols-2 gap-3"><Input id="device-create-min-filesize" type="number" bind:value={formMinFilesize} min="0" placeholder="Min Filesize" /><Input id="device-create-max-filesize" type="number" bind:value={formMaxFilesize} min="0" placeholder="Max Filesize" /></div>
+              <Input id="device-create-aspect-tolerance" type="number" bind:value={formAspectTolerance} min="0" step="0.01" placeholder="Aspect Ratio Tolerance" />
             </div>
           </details>
-          <label class="flex items-center gap-2 text-sm text-slate-700"><Checkbox bind:checked={formAdultAllowed} />Allow Adult Content</label>
-          <label class="flex items-center gap-2 text-sm text-slate-700"><Checkbox bind:checked={formEnabled} />Enabled</label>
+          <div class="flex items-center gap-2 text-sm text-slate-700"><Checkbox id="device-create-adult-allowed" bind:checked={formAdultAllowed} /><label for="device-create-adult-allowed">Allow Adult Content</label></div>
+          <div class="flex items-center gap-2 text-sm text-slate-700"><Checkbox id="device-create-enabled" bind:checked={formEnabled} /><label for="device-create-enabled">Enabled</label></div>
           <div class="flex justify-end gap-2">
             <Button type="button" variant="outline" onclick={() => { showCreate = false; }}>Cancel</Button>
             <Button type="submit">Create</Button>
           </div>
         </form>
       </Card>
+      </div>
     </div>
   {/if}
 </div>

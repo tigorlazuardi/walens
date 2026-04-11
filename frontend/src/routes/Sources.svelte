@@ -15,7 +15,7 @@
   let formName = $state('');
   let formType = $state('');
   let formParams = $state('{}');
-  let formLookupCount = $state(100);
+  let formLookupCount = $state('100');
   let formEnabled = $state(true);
   let formTags = $state('');
   let formRating = $state('');
@@ -24,7 +24,7 @@
     formName = '';
     formType = (typesQuery.data?.items ?? [])[0]?.type_name || '';
     formParams = '{}';
-    formLookupCount = 100;
+    formLookupCount = '100';
     formEnabled = true;
     formTags = '';
     formRating = '';
@@ -33,7 +33,7 @@
   function populateForm(source: Source) {
     formName = source.name;
     formType = source.source_type;
-    formLookupCount = source.lookup_count;
+    formLookupCount = String(source.lookup_count);
     formEnabled = source.is_enabled;
     if (source.params) {
       const p = source.params as unknown as Record<string, unknown>;
@@ -65,7 +65,7 @@
       ? { tags: formTags, rating: formRating }
       : (() => { try { return JSON.parse(formParams); } catch { alert('Invalid JSON in params'); return null; } })();
     if (!params) return;
-    const body: CreateSourceRequest = { name: formName, source_type: formType, params, lookup_count: formLookupCount, is_enabled: formEnabled };
+    const body: CreateSourceRequest = { name: formName, source_type: formType, params, lookup_count: Number(formLookupCount), is_enabled: formEnabled };
     await createMutation.mutateAsync(body);
     showCreate = false;
     resetForm();
@@ -78,7 +78,7 @@
       ? { tags: formTags, rating: formRating }
       : (() => { try { return JSON.parse(formParams); } catch { alert('Invalid JSON in params'); return null; } })();
     if (!params) return;
-    const body: UpdateSourceRequest = { id: editingSource, name: formName, source_type: formType, params, lookup_count: formLookupCount, is_enabled: formEnabled };
+    const body: UpdateSourceRequest = { id: editingSource, name: formName, source_type: formType, params, lookup_count: Number(formLookupCount), is_enabled: formEnabled };
     await updateMutation.mutateAsync(body);
     editingSource = null;
     resetForm();
@@ -87,6 +87,12 @@
   async function handleDelete(id: string) {
     if (confirm('Delete this source? Images from this source will not be deleted.')) {
       await deleteMutation.mutateAsync(id);
+    }
+  }
+
+  function handleCreateDialogKeydown(event: KeyboardEvent) {
+    if (event.key === 'Escape') {
+      showCreate = false;
     }
   }
 </script>
@@ -107,16 +113,16 @@
         <Card class="p-4">
           {#if editingSource === source.id}
             <form class="space-y-4" onsubmit={handleUpdate}>
-              <div class="space-y-2"><label class="text-sm font-medium">Name</label><Input bind:value={formName} required /></div>
-              <div class="space-y-2"><label class="text-sm font-medium">Source Type</label><Select bind:value={formType}>{#if typesQuery.data}{#each typesQuery.data.items ?? [] as t}<option value={t.type_name}>{t.display_name}</option>{/each}{/if}</Select></div>
+              <div class="space-y-2"><label for={`source-${source.id}-name`} class="text-sm font-medium">Name</label><Input id={`source-${source.id}-name`} bind:value={formName} required /></div>
+              <div class="space-y-2"><label for={`source-${source.id}-type`} class="text-sm font-medium">Source Type</label><Select id={`source-${source.id}-type`} bind:value={formType}>{#if typesQuery.data}{#each typesQuery.data.items ?? [] as t}<option value={t.type_name}>{t.display_name}</option>{/each}{/if}</Select></div>
               {#if formType === 'booru'}
-                <div class="space-y-2"><label class="text-sm font-medium">Tags</label><Input bind:value={formTags} placeholder="tag1 tag2 tag3" /></div>
-                <div class="space-y-2"><label class="text-sm font-medium">Rating (optional)</label><Input bind:value={formRating} placeholder="safe, questionable, explicit" /></div>
+                <div class="space-y-2"><label for={`source-${source.id}-tags`} class="text-sm font-medium">Tags</label><Input id={`source-${source.id}-tags`} bind:value={formTags} placeholder="tag1 tag2 tag3" /></div>
+                <div class="space-y-2"><label for={`source-${source.id}-rating`} class="text-sm font-medium">Rating (optional)</label><Input id={`source-${source.id}-rating`} bind:value={formRating} placeholder="safe, questionable, explicit" /></div>
               {:else}
-                <div class="space-y-2"><label class="text-sm font-medium">Params (JSON)</label><Textarea bind:value={formParams} rows="6" placeholder="JSON object" /></div>
+                <div class="space-y-2"><label for={`source-${source.id}-params`} class="text-sm font-medium">Params (JSON)</label><Textarea id={`source-${source.id}-params`} bind:value={formParams} rows={6} placeholder="JSON object" /></div>
               {/if}
-              <div class="space-y-2"><label class="text-sm font-medium">Lookup Count</label><Input type="number" bind:value={formLookupCount} min="1" max="10000" /></div>
-              <label class="flex items-center gap-2 text-sm text-slate-700"><Checkbox bind:checked={formEnabled} />Enabled</label>
+              <div class="space-y-2"><label for={`source-${source.id}-lookup-count`} class="text-sm font-medium">Lookup Count</label><Input id={`source-${source.id}-lookup-count`} type="number" bind:value={formLookupCount} min="1" max="10000" /></div>
+              <div class="flex items-center gap-2 text-sm text-slate-700"><Checkbox id={`source-${source.id}-enabled`} bind:checked={formEnabled} /><label for={`source-${source.id}-enabled`}>Enabled</label></div>
               <div class="flex justify-end gap-2"><Button type="button" variant="outline" onclick={cancelEdit}>Cancel</Button><Button type="submit">Save</Button></div>
             </form>
           {:else}
@@ -144,23 +150,26 @@
   {/if}
 
   {#if showCreate}
-    <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" role="dialog" aria-modal="true" onclick={() => { showCreate = false; }}>
-      <Card class="w-full max-w-lg p-5" onclick={(e) => e.stopPropagation()}>
-        <h2 class="text-lg font-semibold">Add Source</h2>
+    <div class="fixed inset-0 z-50">
+      <button type="button" class="absolute inset-0 bg-black/50" aria-label="Close dialog" onclick={() => { showCreate = false; }}></button>
+      <div class="relative z-10 flex min-h-full items-center justify-center p-4" role="dialog" tabindex="-1" aria-modal="true" aria-labelledby="source-create-title" onkeydown={handleCreateDialogKeydown}>
+      <Card class="w-full max-w-lg p-5">
+        <h2 id="source-create-title" class="text-lg font-semibold">Add Source</h2>
         <form class="mt-4 space-y-4" onsubmit={handleCreate}>
-          <div class="space-y-2"><label class="text-sm font-medium">Name</label><Input bind:value={formName} required /></div>
-          <div class="space-y-2"><label class="text-sm font-medium">Source Type</label><Select bind:value={formType}>{#if typesQuery.data}{#each typesQuery.data.items ?? [] as t}<option value={t.type_name}>{t.display_name}</option>{/each}{/if}</Select></div>
+          <div class="space-y-2"><label for="source-create-name" class="text-sm font-medium">Name</label><Input id="source-create-name" bind:value={formName} required /></div>
+          <div class="space-y-2"><label for="source-create-type" class="text-sm font-medium">Source Type</label><Select id="source-create-type" bind:value={formType}>{#if typesQuery.data}{#each typesQuery.data.items ?? [] as t}<option value={t.type_name}>{t.display_name}</option>{/each}{/if}</Select></div>
           {#if formType === 'booru'}
-            <div class="space-y-2"><label class="text-sm font-medium">Tags</label><Input bind:value={formTags} placeholder="tag1 tag2 tag3" /></div>
-            <div class="space-y-2"><label class="text-sm font-medium">Rating (optional)</label><Input bind:value={formRating} placeholder="safe, questionable, explicit" /></div>
+            <div class="space-y-2"><label for="source-create-tags" class="text-sm font-medium">Tags</label><Input id="source-create-tags" bind:value={formTags} placeholder="tag1 tag2 tag3" /></div>
+            <div class="space-y-2"><label for="source-create-rating" class="text-sm font-medium">Rating (optional)</label><Input id="source-create-rating" bind:value={formRating} placeholder="safe, questionable, explicit" /></div>
           {:else}
-            <div class="space-y-2"><label class="text-sm font-medium">Params (JSON)</label><Textarea bind:value={formParams} rows="6" placeholder="JSON object" /></div>
+            <div class="space-y-2"><label for="source-create-params" class="text-sm font-medium">Params (JSON)</label><Textarea id="source-create-params" bind:value={formParams} rows={6} placeholder="JSON object" /></div>
           {/if}
-          <div class="space-y-2"><label class="text-sm font-medium">Lookup Count</label><Input type="number" bind:value={formLookupCount} min="1" max="10000" /></div>
-          <label class="flex items-center gap-2 text-sm text-slate-700"><Checkbox bind:checked={formEnabled} />Enabled</label>
+          <div class="space-y-2"><label for="source-create-lookup-count" class="text-sm font-medium">Lookup Count</label><Input id="source-create-lookup-count" type="number" bind:value={formLookupCount} min="1" max="10000" /></div>
+          <div class="flex items-center gap-2 text-sm text-slate-700"><Checkbox id="source-create-enabled" bind:checked={formEnabled} /><label for="source-create-enabled">Enabled</label></div>
           <div class="flex justify-end gap-2"><Button type="button" variant="outline" onclick={() => { showCreate = false; }}>Cancel</Button><Button type="submit">Create</Button></div>
         </form>
       </Card>
+      </div>
     </div>
   {/if}
 </div>

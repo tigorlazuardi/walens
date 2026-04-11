@@ -66,6 +66,12 @@
     const source = (sourcesQuery.data?.items ?? []).find((s) => s.id === sourceId);
     return source?.name || sourceId;
   }
+
+  function handleCreateDialogKeydown(event: KeyboardEvent) {
+    if (event.key === 'Escape') {
+      showCreate = false;
+    }
+  }
 </script>
 
 <div class="space-y-4">
@@ -84,9 +90,9 @@
         <Card class="p-4">
           {#if editingSub === sub.id}
             <form class="space-y-4" onsubmit={handleUpdate}>
-              <div class="space-y-2"><label class="text-sm font-medium">Device</label><Select bind:value={formDeviceId}>{#if devicesQuery.data}{#each devicesQuery.data.items as device}<option value={device.id}>{device.name}</option>{/each}{/if}</Select></div>
-              <div class="space-y-2"><label class="text-sm font-medium">Source</label><Select bind:value={formSourceId}>{#if sourcesQuery.data}{#each sourcesQuery.data.items as source}<option value={source.id}>{source.name}</option>{/each}{/if}</Select></div>
-              <label class="flex items-center gap-2 text-sm text-slate-700"><Checkbox bind:checked={formEnabled} />Enabled</label>
+              <div class="space-y-2"><label for={`subscription-${sub.id}-device`} class="text-sm font-medium">Device</label><Select id={`subscription-${sub.id}-device`} bind:value={formDeviceId}>{#if devicesQuery.data}{#each devicesQuery.data.items as device}<option value={device.id}>{device.name}</option>{/each}{/if}</Select></div>
+              <div class="space-y-2"><label for={`subscription-${sub.id}-source`} class="text-sm font-medium">Source</label><Select id={`subscription-${sub.id}-source`} bind:value={formSourceId}>{#if sourcesQuery.data}{#each sourcesQuery.data.items as source}<option value={source.id}>{source.name}</option>{/each}{/if}</Select></div>
+              <div class="flex items-center gap-2 text-sm text-slate-700"><Checkbox id={`subscription-${sub.id}-enabled`} bind:checked={formEnabled} /><label for={`subscription-${sub.id}-enabled`}>Enabled</label></div>
               <div class="flex justify-end gap-2"><Button type="button" variant="outline" onclick={cancelEdit}>Cancel</Button><Button type="submit">Save</Button></div>
             </form>
           {:else}
@@ -104,16 +110,19 @@
   {/if}
 
   {#if showCreate}
-    <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" role="dialog" aria-modal="true" onclick={() => { showCreate = false; }}>
-      <Card class="w-full max-w-lg p-5" onclick={(e) => e.stopPropagation()}>
-        <h2 class="text-lg font-semibold">Add Subscription</h2>
+    <div class="fixed inset-0 z-50">
+      <button type="button" class="absolute inset-0 bg-black/50" aria-label="Close dialog" onclick={() => { showCreate = false; }}></button>
+      <div class="relative z-10 flex min-h-full items-center justify-center p-4" role="dialog" tabindex="-1" aria-modal="true" aria-labelledby="subscription-create-title" onkeydown={handleCreateDialogKeydown}>
+      <Card class="w-full max-w-lg p-5">
+        <h2 id="subscription-create-title" class="text-lg font-semibold">Add Subscription</h2>
         <form class="mt-4 space-y-4" onsubmit={handleCreate}>
-          <div class="space-y-2"><label class="text-sm font-medium">Device</label><Select bind:value={formDeviceId}>{#if devicesQuery.data}{#each devicesQuery.data.items as device}<option value={device.id}>{device.name}</option>{/each}{:else}<option value="">Loading devices...</option>{/if}</Select></div>
-          <div class="space-y-2"><label class="text-sm font-medium">Source</label><Select bind:value={formSourceId}>{#if sourcesQuery.data}{#each sourcesQuery.data.items as source}<option value={source.id}>{source.name}</option>{/each}{:else}<option value="">Loading sources...</option>{/if}</Select></div>
-          <label class="flex items-center gap-2 text-sm text-slate-700"><Checkbox bind:checked={formEnabled} />Enabled</label>
+          <div class="space-y-2"><label for="subscription-create-device" class="text-sm font-medium">Device</label><Select id="subscription-create-device" bind:value={formDeviceId}>{#if devicesQuery.data}{#each devicesQuery.data.items as device}<option value={device.id}>{device.name}</option>{/each}{:else}<option value="">Loading devices...</option>{/if}</Select></div>
+          <div class="space-y-2"><label for="subscription-create-source" class="text-sm font-medium">Source</label><Select id="subscription-create-source" bind:value={formSourceId}>{#if sourcesQuery.data}{#each sourcesQuery.data.items as source}<option value={source.id}>{source.name}</option>{/each}{:else}<option value="">Loading sources...</option>{/if}</Select></div>
+          <div class="flex items-center gap-2 text-sm text-slate-700"><Checkbox id="subscription-create-enabled" bind:checked={formEnabled} /><label for="subscription-create-enabled">Enabled</label></div>
           <div class="flex justify-end gap-2"><Button type="button" variant="outline" onclick={() => { showCreate = false; }}>Cancel</Button><Button type="submit">Create</Button></div>
         </form>
       </Card>
+      </div>
     </div>
   {/if}
 </div>
