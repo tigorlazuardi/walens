@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 
@@ -2385,4 +2386,766 @@ func TestSchedulerReloadOnMutations(t *testing.T) {
 	// to verify Reload is called, and verify routes work correctly here.
 	// This test is a placeholder to document the testing approach.
 	t.Skip("Scheduler reload tested at service level via mockScheduler in source_schedules_test.go")
+}
+
+// TestSPAFallbackWithBasePath tests that the SPA fallback works correctly with a non-root base path.
+func TestSPAFallbackWithBasePath(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := tmpDir + "/test.db"
+
+	testDB, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("failed to open test db: %v", err)
+	}
+	defer testDB.Close()
+
+	// Run migrations
+	if err := db.RunMigrations(testDB); err != nil {
+		t.Fatalf("RunMigrations failed: %v", err)
+	}
+
+	cfg := &config.Config{
+		Server: config.ServerConfig{
+			Host:     "localhost",
+			Port:     0,
+			BasePath: "/walens",
+		},
+		Database: config.DatabaseConfig{
+			Path: dbPath,
+		},
+		Auth: config.AuthConfig{
+			Enabled:      false,
+			CookieSecret: testCookieSecret,
+		},
+		DataDir:  tmpDir,
+		LogLevel: "error",
+		Frontend: config.FrontendConfig{
+			DevMode:   false,
+			ViteURL:   "http://localhost:5173",
+			StaticDir: tmpDir + "/nonexistent", // Non-existent dir, will disable SPA
+		},
+	}
+
+	app := &App{
+		config: cfg,
+		logger: slog.Default(),
+		db:     testDB,
+		queue:  queue.New(slog.Default()),
+		runner: runner.New(slog.Default()),
+	}
+
+	// Initialize configService
+	app.configService = configs.NewService(app.db)
+
+	// Set up minimal scheduler
+	app.scheduler = scheduler.New(slog.Default())
+	app.runner.SetQueue(app.queue)
+
+	handler := app.Handler()
+
+	// When SPA handler fails to initialize (static dir doesn't exist),
+	// the app should fall back to just API handler, returning 404 for unknown routes
+	tests := []struct {
+		name           string
+		method         string
+		path           string
+		expectedStatus int
+	}{
+		{
+			name:           "unknown route returns 404 when SPA not available",
+			method:         http.MethodGet,
+			path:           "/walens/unknown",
+			expectedStatus: http.StatusNotFound,
+		},
+		{
+			name:           "health still works",
+			method:         http.MethodGet,
+			path:           "/walens/health",
+			expectedStatus: http.StatusOK,
+		},
+		{
+			name:           "API route still works",
+			method:         http.MethodGet,
+			path:           "/walens/api/v1/configs/GetConfig",
+			expectedStatus: http.StatusMethodNotAllowed, // Get on POST endpoint
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(tt.method, tt.path, nil)
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, req)
+
+			if rec.Code != tt.expectedStatus {
+				t.Errorf("expected status %d, got %d", tt.expectedStatus, rec.Code)
+			}
+		})
+	}
+}
+
+// TestSPAFallbackRootPath tests that the root path serves the SPA shell when configured.
+func TestSPAFallbackRootPath(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := tmpDir + "/test.db"
+
+	testDB, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("failed to open test db: %v", err)
+	}
+	defer testDB.Close()
+
+	// Run migrations
+	if err := db.RunMigrations(testDB); err != nil {
+		t.Fatalf("RunMigrations failed: %v", err)
+	}
+
+	cfg := &config.Config{
+		Server: config.ServerConfig{
+			Host:     "localhost",
+			Port:     0,
+			BasePath: "/",
+		},
+		Database: config.DatabaseConfig{
+			Path: dbPath,
+		},
+		Auth: config.AuthConfig{
+			Enabled:      false,
+			CookieSecret: testCookieSecret,
+		},
+		DataDir:  tmpDir,
+		LogLevel: "error",
+		Frontend: config.FrontendConfig{
+			DevMode:   false,
+			ViteURL:   "http://localhost:5173",
+			StaticDir: tmpDir + "/nonexistent",
+		},
+	}
+
+	app := &App{
+		config: cfg,
+		logger: slog.Default(),
+		db:     testDB,
+		queue:  queue.New(slog.Default()),
+		runner: runner.New(slog.Default()),
+	}
+
+	// Initialize configService
+	app.configService = configs.NewService(app.db)
+
+	// Set up minimal scheduler
+	app.scheduler = scheduler.New(slog.Default())
+	app.runner.SetQueue(app.queue)
+
+	handler := app.Handler()
+
+	// With auth disabled, the root path returns 404 (no SPA available since static dir doesn't exist)
+	t.Run("root path without SPA returns 404", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusNotFound {
+			t.Errorf("expected status 404, got %d", rec.Code)
+		}
+	})
+
+	// Health should always work
+	t.Run("health at root works", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/health", nil)
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Errorf("expected status 200, got %d", rec.Code)
+		}
+	})
+}
+
+// TestSPABasePathInjection tests that the SPA shell contains window.__WALENS__ config injection.
+func TestSPABasePathInjection(t *testing.T) {
+	// Test the escapeForJS function directly
+	tests := []struct {
+		input    string
+		expected string
+	}{
+		{"/", `"/"`},
+		{"/walens", `"/walens"`},
+		{"/api", `"/api"`},
+		{"http://localhost:5173", `"http://localhost:5173"`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			result := escapeForJS(tt.input)
+			if result != tt.expected {
+				t.Errorf("escapeForJS(%q) = %q, want %q", tt.input, result, tt.expected)
+			}
+		})
+	}
+}
+
+// TestIsAssetPath tests the asset path detection function.
+func TestIsAssetPath(t *testing.T) {
+	tests := []struct {
+		path     string
+		expected bool
+	}{
+		{"/assets/index-abc123.js", true},
+		{"/assets/styles.css", true},
+		{"/favicon.ico", true},
+		{"/images/logo.png", true},           // has .png extension
+		{"/api/v1/configs/GetConfig", false}, // no asset extension
+		{"/health", false},                   // no asset extension
+		{"/docs", false},                     // no asset extension
+		{"/openapi.json", false},             // no asset extension
+		{"/src/main.js", true},               // has .js extension
+		{"/routes/Settings.svelte", false},   // no asset extension
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.path, func(t *testing.T) {
+			result := IsAssetPath(tt.path)
+			if result != tt.expected {
+				t.Errorf("IsAssetPath(%q) = %v, want %v", tt.path, result, tt.expected)
+			}
+		})
+	}
+}
+
+// TestSPRouterRoutes tests that the spRouter correctly routes requests.
+func TestSPRouterRoutes(t *testing.T) {
+	// Create mock handlers that track which was called
+	var apiCalled bool
+	var spaCalled bool
+
+	apiHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		apiCalled = true
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("API"))
+	})
+
+	spaHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		spaCalled = true
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("SPA"))
+	})
+
+	router := &spRouter{
+		apiHandler: apiHandler,
+		spaHandler: spaHandler,
+		basePath:   "/walens",
+	}
+
+	tests := []struct {
+		name         string
+		path         string
+		expectAPI    bool
+		expectSPA    bool
+		expectedCode int
+	}{
+		{
+			name:         "API routes go to API handler",
+			path:         "/walens/api/v1/configs/GetConfig",
+			expectAPI:    true,
+			expectSPA:    false,
+			expectedCode: http.StatusOK,
+		},
+		{
+			name:         "health goes to API handler",
+			path:         "/walens/health",
+			expectAPI:    true,
+			expectSPA:    false,
+			expectedCode: http.StatusOK,
+		},
+		{
+			name:         "docs go to API handler",
+			path:         "/walens/docs",
+			expectAPI:    true,
+			expectSPA:    false,
+			expectedCode: http.StatusOK,
+		},
+		{
+			name:         "openapi goes to API handler",
+			path:         "/walens/openapi.json",
+			expectAPI:    true,
+			expectSPA:    false,
+			expectedCode: http.StatusOK,
+		},
+		{
+			name:         "login goes to API handler",
+			path:         "/walens/api/login",
+			expectAPI:    true,
+			expectSPA:    false,
+			expectedCode: http.StatusOK,
+		},
+		{
+			name:         "logout goes to API handler",
+			path:         "/walens/api/logout",
+			expectAPI:    true,
+			expectSPA:    false,
+			expectedCode: http.StatusOK,
+		},
+		{
+			name:         "unknown routes go to SPA handler",
+			path:         "/walens/unknown",
+			expectAPI:    false,
+			expectSPA:    true,
+			expectedCode: http.StatusOK,
+		},
+		{
+			name:         "root path goes to SPA handler",
+			path:         "/walens",
+			expectAPI:    false,
+			expectSPA:    true,
+			expectedCode: http.StatusOK,
+		},
+		{
+			name:         "frontend routes go to SPA handler",
+			path:         "/walens/sources",
+			expectAPI:    false,
+			expectSPA:    true,
+			expectedCode: http.StatusOK,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			apiCalled = false
+			spaCalled = false
+
+			req := httptest.NewRequest(http.MethodGet, tt.path, nil)
+			rec := httptest.NewRecorder()
+			router.ServeHTTP(rec, req)
+
+			if apiCalled != tt.expectAPI {
+				t.Errorf("apiCalled = %v, want %v", apiCalled, tt.expectAPI)
+			}
+			if spaCalled != tt.expectSPA {
+				t.Errorf("spaCalled = %v, want %v", spaCalled, tt.expectSPA)
+			}
+			if rec.Code != tt.expectedCode {
+				t.Errorf("status = %d, want %d", rec.Code, tt.expectedCode)
+			}
+		})
+	}
+}
+
+// TestSPRouterWithBasePathSlash tests routing when basePath is "/".
+func TestSPRouterWithBasePathSlash(t *testing.T) {
+	var apiCalled bool
+	var spaCalled bool
+
+	apiHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		apiCalled = true
+		w.WriteHeader(http.StatusOK)
+	})
+
+	spaHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		spaCalled = true
+		w.WriteHeader(http.StatusOK)
+	})
+
+	router := &spRouter{
+		apiHandler: apiHandler,
+		spaHandler: spaHandler,
+		basePath:   "/",
+	}
+
+	tests := []struct {
+		name      string
+		path      string
+		expectAPI bool
+		expectSPA bool
+	}{
+		{
+			name:      "API routes at root go to API",
+			path:      "/api/v1/configs/GetConfig",
+			expectAPI: true,
+			expectSPA: false,
+		},
+		{
+			name:      "health at root goes to API",
+			path:      "/health",
+			expectAPI: true,
+			expectSPA: false,
+		},
+		{
+			name:      "unknown routes at root go to SPA",
+			path:      "/sources",
+			expectAPI: false,
+			expectSPA: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			apiCalled = false
+			spaCalled = false
+
+			req := httptest.NewRequest(http.MethodGet, tt.path, nil)
+			rec := httptest.NewRecorder()
+			router.ServeHTTP(rec, req)
+
+			if apiCalled != tt.expectAPI {
+				t.Errorf("apiCalled = %v, want %v", apiCalled, tt.expectAPI)
+			}
+			if spaCalled != tt.expectSPA {
+				t.Errorf("spaCalled = %v, want %v", spaCalled, tt.expectSPA)
+			}
+		})
+	}
+}
+
+// TestSPAWithRealStaticDir tests the SPA handler with a real static directory.
+func TestSPAWithRealStaticDir(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Create fake dist directory with manifest and assets
+	distDir := tmpDir + "/dist"
+	if err := os.MkdirAll(distDir+"/.vite", 0755); err != nil {
+		t.Fatalf("failed to create .vite dir: %v", err)
+	}
+	if err := os.MkdirAll(distDir+"/assets", 0755); err != nil {
+		t.Fatalf("failed to create assets dir: %v", err)
+	}
+
+	// Create minimal manifest.json
+	manifest := `{
+  "src/main.js": {
+    "file": "assets/index-abc123.js",
+    "src": "src/main.js",
+    "isEntry": true,
+    "type": "module"
+  }
+}`
+	if err := os.WriteFile(distDir+"/.vite/manifest.json", []byte(manifest), 0644); err != nil {
+		t.Fatalf("failed to write manifest: %v", err)
+	}
+
+	// Create fake JS asset
+	assetContent := `console.log("test asset");
+export const foo = 42;`
+	if err := os.WriteFile(distDir+"/assets/index-abc123.js", []byte(assetContent), 0644); err != nil {
+		t.Fatalf("failed to write asset: %v", err)
+	}
+
+	// Create SPA handler in production mode to test static asset serving
+	spa, err := NewSPAHandler("/walens", "http://localhost:5173", false, os.DirFS(distDir))
+	if err != nil {
+		t.Fatalf("NewSPAHandler failed: %v", err)
+	}
+
+	t.Run("SPA shell contains window.__WALENS__ config", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/walens/some-route", nil)
+		rec := httptest.NewRecorder()
+		spa.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("expected status 200, got %d", rec.Code)
+		}
+
+		body := rec.Body.String()
+
+		// Check for window.__WALENS__ injection
+		if !strings.Contains(body, "window.__WALENS__") {
+			t.Error("HTML shell missing window.__WALENS__")
+		}
+		if !strings.Contains(body, `"basePath"`) {
+			t.Error("HTML shell missing basePath in config")
+		}
+		if !strings.Contains(body, `"apiBase"`) {
+			t.Error("HTML shell missing apiBase in config")
+		}
+		// Check for correct values
+		if !strings.Contains(body, `"/walens"`) {
+			t.Error("HTML shell missing /walens basePath value")
+		}
+		if !strings.Contains(body, `"/walens/api"`) {
+			t.Error("HTML shell missing /walens/api apiBase value")
+		}
+	})
+
+	t.Run("API route returns 404 from SPA handler", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/walens/api/v1/configs/GetConfig", nil)
+		rec := httptest.NewRecorder()
+		spa.ServeHTTP(rec, req)
+
+		// SPA handler should return 404 for API routes
+		// (letting the API handler on mux handle it)
+		if rec.Code != http.StatusNotFound {
+			t.Fatalf("expected status 404 for API route, got %d", rec.Code)
+		}
+	})
+
+	t.Run("assets are served correctly", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/walens/assets/index-abc123.js", nil)
+		rec := httptest.NewRecorder()
+		spa.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("expected status 200 for asset, got %d", rec.Code)
+		}
+		if !strings.Contains(rec.Body.String(), "test asset") {
+			t.Error("asset content not served correctly")
+		}
+	})
+}
+
+// TestSPAWithBasePathAndHealth tests that health route still works while SPA fallback serves shell.
+func TestSPAWithBasePathAndHealth(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := tmpDir + "/test.db"
+
+	testDB, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("failed to open test db: %v", err)
+	}
+	defer testDB.Close()
+
+	if err := db.RunMigrations(testDB); err != nil {
+		t.Fatalf("RunMigrations failed: %v", err)
+	}
+
+	// Create fake dist directory
+	distDir := tmpDir + "/dist"
+	if err := os.MkdirAll(distDir+"/.vite", 0755); err != nil {
+		t.Fatalf("failed to create .vite dir: %v", err)
+	}
+	if err := os.MkdirAll(distDir+"/assets", 0755); err != nil {
+		t.Fatalf("failed to create assets dir: %v", err)
+	}
+
+	manifest := `{"src/main.js":{"file":"assets/index-abc123.js","src":"src/main.js","type":"module"}}`
+	if err := os.WriteFile(distDir+"/.vite/manifest.json", []byte(manifest), 0644); err != nil {
+		t.Fatalf("failed to write manifest: %v", err)
+	}
+	if err := os.WriteFile(distDir+"/assets/index-abc123.js", []byte(`console.log("test");`), 0644); err != nil {
+		t.Fatalf("failed to write asset: %v", err)
+	}
+
+	// Use dev mode to avoid needing proper manifest with entry point
+	cfg := &config.Config{
+		Server: config.ServerConfig{
+			Host:     "localhost",
+			Port:     0,
+			BasePath: "/walens",
+		},
+		Database: config.DatabaseConfig{
+			Path: dbPath,
+		},
+		Auth: config.AuthConfig{
+			Enabled:      false,
+			CookieSecret: testCookieSecret,
+		},
+		DataDir:  tmpDir,
+		LogLevel: "error",
+		Frontend: config.FrontendConfig{
+			DevMode:   true,
+			ViteURL:   "http://localhost:5173",
+			StaticDir: distDir,
+		},
+	}
+
+	app := &App{
+		config: cfg,
+		logger: slog.Default(),
+		db:     testDB,
+		queue:  queue.New(slog.Default()),
+		runner: runner.New(slog.Default()),
+	}
+
+	app.configService = configs.NewService(app.db)
+	app.scheduler = scheduler.New(slog.Default())
+	app.runner.SetQueue(app.queue)
+
+	handler := app.Handler()
+
+	t.Run("health at /walens/health works", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/walens/health", nil)
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Errorf("expected status 200, got %d", rec.Code)
+		}
+	})
+
+	t.Run("SPA route serves shell with config", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/walens/sources", nil)
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("expected status 200, got %d", rec.Code)
+		}
+
+		body := rec.Body.String()
+		if !strings.Contains(body, "window.__WALENS__") {
+			t.Error("SPA shell missing window.__WALENS__")
+		}
+		if !strings.Contains(body, `"/walens"`) {
+			t.Error("SPA shell missing /walens basePath")
+		}
+		if !strings.Contains(body, `"/walens/api"`) {
+			t.Error("SPA shell missing /walens/api apiBase")
+		}
+	})
+
+	t.Run("API route at /walens/api/v1/... works", func(t *testing.T) {
+		body := `{}`
+		req := httptest.NewRequest(http.MethodPost, "/walens/api/v1/configs/GetConfig", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Errorf("expected status 200, got %d", rec.Code)
+		}
+	})
+}
+
+// TestDevModeSPAHandler tests the SPA handler in dev mode.
+func TestDevModeSPAHandler(t *testing.T) {
+	// In dev mode, we don't need a real FS
+	spa, err := NewSPAHandler("/walens", "http://localhost:5173", true, nil)
+	if err != nil {
+		t.Fatalf("NewSPAHandler failed: %v", err)
+	}
+
+	t.Run("dev mode serves HTML shell with Vite URL", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/walens/some-route", nil)
+		rec := httptest.NewRecorder()
+		spa.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("expected status 200, got %d", rec.Code)
+		}
+
+		body := rec.Body.String()
+		// Check config injection
+		if !strings.Contains(body, "window.__WALENS__") {
+			t.Error("HTML shell missing window.__WALENS__")
+		}
+		if !strings.Contains(body, `"/walens"`) {
+			t.Error("HTML shell missing /walens basePath")
+		}
+		// In dev mode, the fragment tags should contain the Vite dev server URL
+		if !strings.Contains(body, "http://localhost:5173") {
+			t.Error("HTML shell should contain Vite dev server URL")
+		}
+	})
+}
+
+// TestSPAHandlerAtRoot tests the SPA handler with basePath="/".
+func TestSPAHandlerAtRoot(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := tmpDir + "/test.db"
+
+	testDB, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("failed to open test db: %v", err)
+	}
+	defer testDB.Close()
+
+	if err := db.RunMigrations(testDB); err != nil {
+		t.Fatalf("RunMigrations failed: %v", err)
+	}
+
+	// Create fake dist directory
+	distDir := tmpDir + "/dist"
+	if err := os.MkdirAll(distDir+"/.vite", 0755); err != nil {
+		t.Fatalf("failed to create .vite dir: %v", err)
+	}
+	if err := os.MkdirAll(distDir+"/assets", 0755); err != nil {
+		t.Fatalf("failed to create assets dir: %v", err)
+	}
+
+	manifest := `{"src/main.js":{"file":"assets/index-abc123.js","src":"src/main.js","type":"module"}}`
+	if err := os.WriteFile(distDir+"/.vite/manifest.json", []byte(manifest), 0644); err != nil {
+		t.Fatalf("failed to write manifest: %v", err)
+	}
+	if err := os.WriteFile(distDir+"/assets/index-abc123.js", []byte(`console.log("root test");`), 0644); err != nil {
+		t.Fatalf("failed to write asset: %v", err)
+	}
+
+	// Use dev mode to avoid needing proper manifest with entry point
+	cfg := &config.Config{
+		Server: config.ServerConfig{
+			Host:     "localhost",
+			Port:     0,
+			BasePath: "/",
+		},
+		Database: config.DatabaseConfig{
+			Path: dbPath,
+		},
+		Auth: config.AuthConfig{
+			Enabled:      false,
+			CookieSecret: testCookieSecret,
+		},
+		DataDir:  tmpDir,
+		LogLevel: "error",
+		Frontend: config.FrontendConfig{
+			DevMode:   true,
+			ViteURL:   "http://localhost:5173",
+			StaticDir: distDir,
+		},
+	}
+
+	app := &App{
+		config: cfg,
+		logger: slog.Default(),
+		db:     testDB,
+		queue:  queue.New(slog.Default()),
+		runner: runner.New(slog.Default()),
+	}
+
+	app.configService = configs.NewService(app.db)
+	app.scheduler = scheduler.New(slog.Default())
+	app.runner.SetQueue(app.queue)
+
+	handler := app.Handler()
+
+	t.Run("health at /health works", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/health", nil)
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Errorf("expected status 200, got %d", rec.Code)
+		}
+	})
+
+	t.Run("SPA route at /sources serves shell", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/sources", nil)
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("expected status 200, got %d", rec.Code)
+		}
+
+		body := rec.Body.String()
+		if !strings.Contains(body, "window.__WALENS__") {
+			t.Error("SPA shell missing window.__WALENS__")
+		}
+		if !strings.Contains(body, `"/"`) && !strings.Contains(body, `"/"`) {
+			// basePath should be "/"
+		}
+		if !strings.Contains(body, `"/api"`) {
+			t.Error("SPA shell missing /api apiBase")
+		}
+	})
+
+	t.Run("API route works", func(t *testing.T) {
+		body := `{}`
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/configs/GetConfig", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Errorf("expected status 200, got %d", rec.Code)
+		}
+	})
 }

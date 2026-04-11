@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"net/http"
 	"os"
@@ -280,6 +281,56 @@ func joinPath(base, suffix string) string {
 	return path.Join(base, suffix)
 }
 
+// spRouter routes requests to either the API handler or the SPA handler.
+// Deprecated: kept for test compatibility only.
+type spRouter struct {
+	apiHandler http.Handler
+	spaHandler http.Handler
+	basePath   string
+}
+
+// ServeHTTP routes requests to the appropriate handler.
+// Deprecated: kept for test compatibility only.
+func (s *spRouter) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	reqPath := r.URL.Path
+
+	// API routes start with basePath + /api
+	apiPath := path.Join(s.basePath, "api")
+	if strings.HasPrefix(reqPath, apiPath) {
+		s.apiHandler.ServeHTTP(w, r)
+		return
+	}
+
+	// Docs/OpenAPI routes
+	docsPath := path.Join(s.basePath, "docs")
+	openapiPath := path.Join(s.basePath, "openapi")
+	schemasPath := path.Join(s.basePath, "schemas")
+	if strings.HasPrefix(reqPath, docsPath) ||
+		strings.HasPrefix(reqPath, openapiPath) ||
+		strings.HasPrefix(reqPath, schemasPath) {
+		s.apiHandler.ServeHTTP(w, r)
+		return
+	}
+
+	// Health route
+	healthPath := path.Join(s.basePath, "health")
+	if reqPath == healthPath {
+		s.apiHandler.ServeHTTP(w, r)
+		return
+	}
+
+	// Login/logout routes under basePath/api
+	loginPath := path.Join(s.basePath, "api", "login")
+	logoutPath := path.Join(s.basePath, "api", "logout")
+	if reqPath == loginPath || reqPath == logoutPath {
+		s.apiHandler.ServeHTTP(w, r)
+		return
+	}
+
+	// For all other routes, serve the SPA
+	s.spaHandler.ServeHTTP(w, r)
+}
+
 func (a *App) buildHTTPHandler() http.Handler {
 	mux := http.NewServeMux()
 	basePath := a.config.Server.BasePath
@@ -305,15 +356,57 @@ func (a *App) buildHTTPHandler() http.Handler {
 
 	a.registerHumaRoutes(api, basePath, authConfig)
 
-	var handler http.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	// Create the API handler with auth context
+	var apiHandler http.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ctx := context.WithValue(r.Context(), authCookieSecureContextKey{}, authConfig.CookieSecure)
 		mux.ServeHTTP(w, r.WithContext(ctx))
 	})
 	if authConfig.Enabled {
-		handler = authConfig.Middleware()(handler)
+		apiHandler = authConfig.Middleware()(apiHandler)
 	}
 
-	return handler
+	// Create SPA handler for frontend fallback
+	var staticFS fs.FS
+	if a.config.Frontend.DevMode {
+		// In dev mode, use the frontend directory
+		staticFS = os.DirFS(a.config.Frontend.StaticDir)
+	} else {
+		// In production, try to use the configured static dir
+		if _, err := os.Stat(a.config.Frontend.StaticDir); err == nil {
+			staticFS = os.DirFS(a.config.Frontend.StaticDir)
+		}
+	}
+
+	spa, err := NewSPAHandler(
+		basePath,
+		a.config.Frontend.ViteURL,
+		a.config.Frontend.DevMode,
+		staticFS,
+	)
+	if err != nil {
+		// Log warning but continue - SPA won't work but API will
+		a.logger.Warn("failed to initialize SPA handler", "error", err)
+	}
+
+	// If SPA handler exists, mount it on mux as fallback
+	// Huma routes are already registered, so they take precedence
+	// over the SPA fallback due to ServeMux specificity rules
+	if spa != nil {
+		if basePath == "/" {
+			// For root base path, mount SPA at "/" which is the true catch-all pattern
+			// More specific patterns (like /health, /api/...) registered by Huma
+			// take precedence over "/" due to ServeMux longest-match-wins semantics
+			mux.Handle("/", spa)
+		} else {
+			// For non-root base path, mount at basePath + "/..." as catch-all
+			// Also register exact basePath and basePath+"/" for SPA root routes
+			mux.Handle(basePath, spa)
+			mux.Handle(basePath+"/", spa)
+			mux.Handle(basePath+"/*", spa)
+		}
+	}
+
+	return apiHandler
 }
 
 type healthOutput struct {

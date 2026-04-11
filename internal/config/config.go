@@ -15,12 +15,19 @@ type Config struct {
 	Auth     AuthConfig
 	DataDir  string
 	LogLevel string
+	Frontend FrontendConfig
 }
 
 type ServerConfig struct {
 	Host     string
 	Port     int
 	BasePath string
+}
+
+type FrontendConfig struct {
+	DevMode   bool
+	ViteURL   string
+	StaticDir string
 }
 
 type DatabaseConfig struct {
@@ -73,6 +80,11 @@ func Load() *Config {
 		},
 		DataDir:  getEnv("WALENS_DATA_DIR", "./data"),
 		LogLevel: getEnv("WALENS_LOG_LEVEL", "info"),
+		Frontend: FrontendConfig{
+			DevMode:   getEnvBool("WALENS_FRONTEND_DEV", false),
+			ViteURL:   getEnv("WALENS_VITE_URL", "http://localhost:5173"),
+			StaticDir: getEnv("WALENS_FRONTEND_STATIC_DIR", "./frontend/dist"),
+		},
 	}
 }
 
