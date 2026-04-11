@@ -12,20 +12,20 @@ import (
 )
 
 type Devices struct {
-	ID                   *dbtypes.UUID         `sql:"primary_key" json:"id" doc:"Unique device identifier (UUIDv7)"`
-	Name                 string                `json:"name" doc:"Human-readable device name"`
-	Slug                 string                `json:"slug" doc:"URL-safe device identifier for paths"`
-	ScreenWidth          int64                 `json:"screen_width" doc:"Device screen width in pixels"`
-	ScreenHeight         int64                 `json:"screen_height" doc:"Device screen height in pixels"`
-	MinImageWidth        int64                 `json:"min_image_width" doc:"Minimum image width filter in pixels (0 = no limit)"`
-	MaxImageWidth        int64                 `json:"max_image_width" doc:"Maximum image width filter in pixels (0 = no limit)"`
-	MinImageHeight       int64                 `json:"min_image_height" doc:"Minimum image height filter in pixels (0 = no limit)"`
-	MaxImageHeight       int64                 `json:"max_image_height" doc:"Maximum image height filter in pixels (0 = no limit)"`
-	MinFilesize          int64                 `json:"min_filesize" doc:"Minimum file size filter in bytes (0 = no limit)"`
-	MaxFilesize          int64                 `json:"max_filesize" doc:"Maximum file size filter in bytes (0 = no limit)"`
-	IsAdultAllowed       dbtypes.BoolInt       `json:"is_adult_allowed" doc:"Whether adult content is allowed for this device"`
-	IsEnabled            dbtypes.BoolInt       `json:"is_enabled" doc:"Whether the device is active and receiving wallpapers"`
-	AspectRatioTolerance float64               `json:"aspect_ratio_tolerance" doc:"Absolute aspect ratio tolerance for matching wallpapers"`
-	CreatedAt            dbtypes.UnixMilliTime `json:"created_at" doc:"Device creation timestamp"`
-	UpdatedAt            dbtypes.UnixMilliTime `json:"updated_at" doc:"Last modification timestamp"`
+	ID                   dbtypes.UUID          `sql:"primary_key" doc:"Unique device identifier (UUIDv7)" required:"true" json:"id",omitzero`
+	Name                 string                `doc:"Human-readable device name" required:"true" json:"name",omitzero`
+	Slug                 string                `doc:"URL-safe device identifier for paths" required:"true" json:"slug",omitzero`
+	ScreenWidth          int64                 `doc:"Device screen width in pixels" required:"true" json:"screen_width",omitzero`
+	ScreenHeight         int64                 `doc:"Device screen height in pixels" required:"true" json:"screen_height",omitzero`
+	MinImageWidth        int64                 `doc:"Minimum image width filter in pixels (0 = no limit)" required:"true" json:"min_image_width",omitzero`
+	MaxImageWidth        int64                 `doc:"Maximum image width filter in pixels (0 = no limit)" required:"true" json:"max_image_width",omitzero`
+	MinImageHeight       int64                 `doc:"Minimum image height filter in pixels (0 = no limit)" required:"true" json:"min_image_height",omitzero`
+	MaxImageHeight       int64                 `doc:"Maximum image height filter in pixels (0 = no limit)" required:"true" json:"max_image_height",omitzero`
+	MinFilesize          int64                 `doc:"Minimum file size filter in bytes (0 = no limit)" required:"true" json:"min_filesize",omitzero`
+	MaxFilesize          int64                 `doc:"Maximum file size filter in bytes (0 = no limit)" required:"true" json:"max_filesize",omitzero`
+	IsAdultAllowed       dbtypes.BoolInt       `doc:"Whether adult content is allowed for this device" required:"true" json:"is_adult_allowed",omitzero`
+	IsEnabled            dbtypes.BoolInt       `doc:"Whether the device is active and receiving wallpapers" required:"true" json:"is_enabled",omitzero`
+	AspectRatioTolerance float64               `doc:"Absolute aspect ratio tolerance for matching wallpapers" required:"true" json:"aspect_ratio_tolerance",omitzero`
+	CreatedAt            dbtypes.UnixMilliTime `doc:"Device creation timestamp" required:"true" json:"created_at",omitzero`
+	UpdatedAt            dbtypes.UnixMilliTime `doc:"Last modification timestamp" required:"true" json:"updated_at",omitzero`
 }

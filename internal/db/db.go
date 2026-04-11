@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -13,18 +14,18 @@ import (
 
 func Open(dbPath string) (*sql.DB, error) {
 	dir := filepath.Dir(dbPath)
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return nil, err
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return nil, fmt.Errorf("failed to make directory at %s: %w", dbPath, err)
 	}
 
 	dsn := sqliteDSN(dbPath)
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to open sqlite at %s: %w", dsn, err)
 	}
 
 	if err := db.Ping(); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to execute ping to %s: %w", dbPath, err)
 	}
 
 	db.SetMaxOpenConns(4)
@@ -38,7 +39,7 @@ func Open(dbPath string) (*sql.DB, error) {
 	for _, p := range pragmas {
 		if _, err := db.Exec(p); err != nil {
 			db.Close()
-			return nil, err
+			return nil, fmt.Errorf("failed to execute pragma %s: %w", p, err)
 		}
 	}
 
@@ -56,9 +57,16 @@ func sqliteDSN(dbPath string) string {
 		return "file::memory:?" + values.Encode()
 	}
 
+	// Convert relative paths to absolute to ensure valid file URI.
+	absPath, err := filepath.Abs(dbPath)
+	if err != nil {
+		// Fallback to original path if Abs fails (should not happen in practice).
+		absPath = dbPath
+	}
+
 	return (&url.URL{
 		Scheme:   "file",
-		Path:     filepath.ToSlash(dbPath),
+		Path:     filepath.ToSlash(absPath),
 		RawQuery: values.Encode(),
 	}).String()
 }

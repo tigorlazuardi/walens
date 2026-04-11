@@ -13,12 +13,12 @@ import (
 // GetImageOperation returns the Huma operation metadata for GetImage.
 func GetImageOperation(basePath string) huma.Operation {
 	return huma.Operation{
-		OperationID: "post-images-get-image",
+		OperationID: "GetImage",
 		Method:      "POST",
 		Path:        path.Join(basePath, "/api/v1/images/GetImage"),
 		Summary:     "Get a single image by ID",
 		Description: "Retrieves a single image by its unique identifier.",
-		Tags:        []string{"images"},
+		Tags:        []string{"Images"},
 	}
 }
 

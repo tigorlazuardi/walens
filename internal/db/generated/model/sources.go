@@ -12,12 +12,12 @@ import (
 )
 
 type Sources struct {
-	ID          *dbtypes.UUID         `sql:"primary_key" json:"id" doc:"Unique source identifier (UUIDv7)"`
-	Name        string                `json:"name" doc:"Unique human-readable source name"`
-	SourceType  string                `json:"source_type" doc:"Registered source implementation name (e.g., booru, reddit)"`
-	Params      dbtypes.RawJSON       `json:"params" doc:"Source-specific configuration as JSON"`
-	LookupCount int64                 `json:"lookup_count" doc:"Upstream lookup budget per run (0 = use source default)"`
-	IsEnabled   dbtypes.BoolInt       `json:"is_enabled" doc:"Whether this source is active"`
-	CreatedAt   dbtypes.UnixMilliTime `json:"created_at" doc:"Source creation timestamp"`
-	UpdatedAt   dbtypes.UnixMilliTime `json:"updated_at" doc:"Last modification timestamp"`
+	ID          dbtypes.UUID          `sql:"primary_key" doc:"Unique source identifier (UUIDv7)" required:"true" json:"id",omitzero`
+	Name        string                `doc:"Unique human-readable source name" required:"true" json:"name",omitzero`
+	SourceType  string                `doc:"Registered source implementation name (e.g., booru, reddit)" required:"true" json:"source_type",omitzero`
+	Params      dbtypes.RawJSON       `doc:"Source-specific configuration as JSON" required:"true" json:"params",omitzero`
+	LookupCount int64                 `doc:"Upstream lookup budget per run (0 = use source default)" required:"true" json:"lookup_count",omitzero`
+	IsEnabled   dbtypes.BoolInt       `doc:"Whether this source is active" required:"true" json:"is_enabled",omitzero`
+	CreatedAt   dbtypes.UnixMilliTime `doc:"Source creation timestamp" required:"true" json:"created_at",omitzero`
+	UpdatedAt   dbtypes.UnixMilliTime `doc:"Last modification timestamp" required:"true" json:"updated_at",omitzero`
 }

@@ -12,12 +12,12 @@ import (
 // SetImageFavoriteOperation returns the Huma operation metadata for SetImageFavorite.
 func SetImageFavoriteOperation(basePath string) huma.Operation {
 	return huma.Operation{
-		OperationID: "post-images-set-image-favorite",
+		OperationID: "SetImageFavorite",
 		Method:      "POST",
 		Path:        path.Join(basePath, "/api/v1/images/SetImageFavorite"),
 		Summary:     "Set image favorite status",
 		Description: "Updates the is_favorite flag on an image.",
-		Tags:        []string{"images"},
+		Tags:        []string{"Images"},
 	}
 }
 

@@ -11,12 +11,12 @@ import (
 // GetSourceScheduleOperation returns the Huma operation metadata for GetSourceSchedule.
 func GetSourceScheduleOperation(basePath string) huma.Operation {
 	return huma.Operation{
-		OperationID: "post-source_schedules-get-source_schedule",
+		OperationID: "GetSourceSchedule",
 		Method:      "POST",
 		Path:        path.Join(basePath, "/api/v1/source_schedules/GetSourceSchedule"),
 		Summary:     "Get a source schedule by ID",
 		Description: "Returns a single source schedule by its ID.",
-		Tags:        []string{"source_schedules"},
+		Tags:        []string{"Source Schedules"},
 	}
 }
 

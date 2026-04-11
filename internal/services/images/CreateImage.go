@@ -37,7 +37,7 @@ func (s *Service) CreateImage(ctx context.Context, req CreateImageRequest) (*mod
 	id := dbtypes.MustNewUUIDV7()
 
 	row := model.Images{
-		ID:                   &id,
+		ID:                   id,
 		SourceID:             &req.SourceID,
 		UniqueIdentifier:     req.UniqueIdentifier,
 		SourceType:           req.SourceType,

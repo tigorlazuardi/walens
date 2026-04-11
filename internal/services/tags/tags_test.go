@@ -121,8 +121,8 @@ func TestEnsureTag_CreateNew(t *testing.T) {
 	if tag.NormalizedName != "mytag" {
 		t.Errorf("NormalizedName = %q, want %q", tag.NormalizedName, "mytag")
 	}
-	if tag.ID == nil {
-		t.Error("ID should not be nil")
+	if tag.ID.UUID.String() == "" {
+		t.Error("ID should not be empty")
 	}
 }
 
@@ -204,7 +204,7 @@ func TestEnsureImageTag_CreateNew(t *testing.T) {
 		t.Fatalf("EnsureTag failed: %v", err)
 	}
 
-	imgTag, err := svc.EnsureImageTag(ctx, imageID, *tag.ID)
+	imgTag, err := svc.EnsureImageTag(ctx, imageID, tag.ID)
 	if err != nil {
 		t.Fatalf("EnsureImageTag failed: %v", err)
 	}
@@ -237,12 +237,12 @@ func TestEnsureImageTag_Idempotent(t *testing.T) {
 	}
 
 	// Create association twice
-	imgTag1, err := svc.EnsureImageTag(ctx, imageID, *tag.ID)
+	imgTag1, err := svc.EnsureImageTag(ctx, imageID, tag.ID)
 	if err != nil {
 		t.Fatalf("EnsureImageTag failed: %v", err)
 	}
 
-	imgTag2, err := svc.EnsureImageTag(ctx, imageID, *tag.ID)
+	imgTag2, err := svc.EnsureImageTag(ctx, imageID, tag.ID)
 	if err != nil {
 		t.Fatalf("EnsureImageTag failed: %v", err)
 	}
@@ -280,7 +280,7 @@ func TestSyncImageTags_Basic(t *testing.T) {
 	}
 
 	// Verify image-tag associations were created
-	imgTag, err := svc.getImageTag(ctx, imageID, *tag1.ID)
+	imgTag, err := svc.getImageTag(ctx, imageID, tag1.ID)
 	if err != nil {
 		t.Errorf("image tag should exist: %v", err)
 	}
@@ -314,7 +314,7 @@ func TestSyncImageTags_Dedupe(t *testing.T) {
 	}
 
 	// Should only have one image-tag association
-	imgTag, err := svc.getImageTag(ctx, imageID, *tag.ID)
+	imgTag, err := svc.getImageTag(ctx, imageID, tag.ID)
 	if err != nil {
 		t.Fatalf("image tag should exist: %v", err)
 	}

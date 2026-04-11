@@ -59,9 +59,14 @@ func createFieldType(table metadata.Table, column metadata.Column) template.Type
 func buildFieldTags(table metadata.Table, column metadata.Column, existing []string) []string {
 	tags := make([]string, 0, len(existing)+2)
 	tags = append(tags, existing...)
-	tags = append(tags, fmt.Sprintf(`json:%q`, column.Name))
 	if docTag := createDocTag(table, column); docTag != "" {
 		tags = append(tags, docTag)
+	}
+	if !column.IsNullable {
+		tags = append(tags, `required:"true"`)
+		tags = append(tags, fmt.Sprintf(`json:%q,omitzero`, column.Name))
+	} else {
+		tags = append(tags, fmt.Sprintf(`json:%q`, column.Name))
 	}
 	return tags
 }

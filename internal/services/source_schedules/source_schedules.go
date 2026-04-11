@@ -52,11 +52,8 @@ func ValidateCronExpr(expr string) (cron.Schedule, error) {
 	return parser.Parse(expr)
 }
 
-func scheduleIDValue(id *dbtypes.UUID) (dbtypes.UUID, bool) {
-	if id == nil {
-		return dbtypes.UUID{}, false
-	}
-	return *id, true
+func scheduleIDValue(id dbtypes.UUID) (dbtypes.UUID, bool) {
+	return id, true
 }
 
 func CheckOverlapWarnings(schedules []ScheduleWithSource, lookaheadDays int) ([]OverlapWarning, error) {

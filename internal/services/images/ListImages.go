@@ -175,10 +175,12 @@ func (s *Service) ListImages(ctx context.Context, req ListImagesRequest) (ListIm
 		slices.Reverse(items)
 	}
 	if hasMore {
-		cursor.Next = items[len(items)-1].ID
+		nextID := items[len(items)-1].ID
+		cursor.Next = &nextID
 	}
 	if next != "" {
-		cursor.Prev = items[0].ID
+		prevID := items[0].ID
+		cursor.Prev = &prevID
 	}
 
 	return ListImagesResponse{Items: items, Pagination: cursor, Total: total}, nil

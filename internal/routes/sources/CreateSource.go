@@ -11,12 +11,12 @@ import (
 // CreateSourceOperation returns the Huma operation metadata for CreateSource.
 func CreateSourceOperation(basePath string) huma.Operation {
 	return huma.Operation{
-		OperationID: "post-sources-create-source",
+		OperationID: "CreateSource",
 		Method:      "POST",
 		Path:        path.Join(basePath, "/api/v1/sources/CreateSource"),
 		Summary:     "Create a new configured source",
 		Description: "Creates a new configured source row. The source_type must be a registered source implementation. Params are validated against the source implementation's schema.",
-		Tags:        []string{"sources"},
+		Tags:        []string{"Sources"},
 	}
 }
 

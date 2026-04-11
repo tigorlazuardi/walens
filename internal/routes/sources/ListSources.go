@@ -11,12 +11,12 @@ import (
 // ListSourcesOperation returns the Huma operation metadata for ListSources.
 func ListSourcesOperation(basePath string) huma.Operation {
 	return huma.Operation{
-		OperationID: "post-sources-list-sources",
+		OperationID: "ListSources",
 		Method:      "POST",
 		Path:        path.Join(basePath, "/api/v1/sources/ListSources"),
 		Summary:     "List all configured sources",
 		Description: "Returns all configured source rows, ordered by name.",
-		Tags:        []string{"sources"},
+		Tags:        []string{"Sources"},
 	}
 }
 

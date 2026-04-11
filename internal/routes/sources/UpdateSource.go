@@ -11,12 +11,12 @@ import (
 // UpdateSourceOperation returns the Huma operation metadata for UpdateSource.
 func UpdateSourceOperation(basePath string) huma.Operation {
 	return huma.Operation{
-		OperationID: "post-sources-update-source",
+		OperationID: "UpdateSource",
 		Method:      "POST",
 		Path:        path.Join(basePath, "/api/v1/sources/UpdateSource"),
 		Summary:     "Update an existing source",
 		Description: "Updates an existing configured source row with full-object update semantics. All fields are required. The source_type must be a registered source implementation and params are validated against it.",
-		Tags:        []string{"sources"},
+		Tags:        []string{"Sources"},
 	}
 }
 

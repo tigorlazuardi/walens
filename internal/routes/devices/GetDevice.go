@@ -11,12 +11,12 @@ import (
 // GetDeviceOperation returns the Huma operation metadata for GetDevice.
 func GetDeviceOperation(basePath string) huma.Operation {
 	return huma.Operation{
-		OperationID: "post-devices-get-device",
+		OperationID: "GetDevice",
 		Method:      "POST",
 		Path:        path.Join(basePath, "/api/v1/devices/GetDevice"),
 		Summary:     "Get a device by ID",
 		Description: "Returns a single device row by its ID.",
-		Tags:        []string{"devices"},
+		Tags:        []string{"Devices"},
 	}
 }
 

@@ -11,12 +11,12 @@ import (
 // ListDeviceSubscriptionsOperation returns the Huma operation metadata for ListDeviceSubscriptions.
 func ListDeviceSubscriptionsOperation(basePath string) huma.Operation {
 	return huma.Operation{
-		OperationID: "post-device_subscriptions-list-device_subscriptions",
+		OperationID: "ListDeviceSubscriptions",
 		Method:      "POST",
 		Path:        path.Join(basePath, "/api/v1/device_subscriptions/ListDeviceSubscriptions"),
 		Summary:     "List all device subscriptions",
 		Description: "Returns all device source subscription rows, ordered by creation time.",
-		Tags:        []string{"device_subscriptions"},
+		Tags:        []string{"Device Subscriptions"},
 	}
 }
 

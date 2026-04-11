@@ -11,13 +11,13 @@ import (
 // DeleteSourceOperation returns the Huma operation metadata for DeleteSource.
 func DeleteSourceOperation(basePath string) huma.Operation {
 	return huma.Operation{
-		OperationID:   "post-sources-delete-source",
+		OperationID:   "DeleteSource",
 		Method:        "POST",
 		Path:          path.Join(basePath, "/api/v1/sources/DeleteSource"),
 		DefaultStatus: 204,
 		Summary:       "Delete a source by ID",
 		Description:   "Deletes a configured source row by its ID. This also cascades to delete associated source_schedules and device_source_subscriptions.",
-		Tags:          []string{"sources"},
+		Tags:          []string{"Sources"},
 	}
 }
 

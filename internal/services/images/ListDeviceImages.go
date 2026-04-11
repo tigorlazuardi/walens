@@ -298,10 +298,12 @@ func (s *Service) ListDeviceImages(ctx context.Context, req ListDeviceImagesRequ
 		slices.Reverse(items)
 	}
 	if hasMore {
-		cursor.Next = items[len(items)-1].ID
+		nextID := items[len(items)-1].ID
+		cursor.Next = &nextID
 	}
 	if next != "" {
-		cursor.Prev = items[0].ID
+		prevID := items[0].ID
+		cursor.Prev = &prevID
 	}
 
 	return ListDeviceImagesResponse{Items: items, Pagination: cursor, Total: total}, nil

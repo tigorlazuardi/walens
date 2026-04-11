@@ -14,12 +14,12 @@ type SourceTypeMetadata = sourcetypessvc.SourceTypeMetadata
 // ListSourceTypesOperation returns the Huma operation metadata for ListSourceTypes.
 func ListSourceTypesOperation(basePath string) huma.Operation {
 	return huma.Operation{
-		OperationID: "post-source-types-list-source-types",
+		OperationID: "ListSourceTypes",
 		Method:      "POST",
 		Path:        path.Join(basePath, "/api/v1/source_types/ListSourceTypes"),
 		Summary:     "List all registered source types",
 		Description: "Returns metadata for all source types registered in the system, including type name, display name, default lookup count, and parameter schema.",
-		Tags:        []string{"source_types"},
+		Tags:        []string{"Source Types"},
 	}
 }
 

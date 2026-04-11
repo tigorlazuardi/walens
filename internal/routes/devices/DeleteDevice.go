@@ -11,13 +11,13 @@ import (
 // DeleteDeviceOperation returns the Huma operation metadata for DeleteDevice.
 func DeleteDeviceOperation(basePath string) huma.Operation {
 	return huma.Operation{
-		OperationID:   "post-devices-delete-device",
+		OperationID:   "DeleteDevice",
 		Method:        "POST",
 		Path:          path.Join(basePath, "/api/v1/devices/DeleteDevice"),
 		DefaultStatus: 204,
 		Summary:       "Delete a device by ID",
 		Description:   "Deletes a device row by its ID. This also cascades to delete associated device_source_subscriptions and image_assignments.",
-		Tags:          []string{"devices"},
+		Tags:          []string{"Devices"},
 	}
 }
 

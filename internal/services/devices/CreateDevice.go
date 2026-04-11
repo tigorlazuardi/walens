@@ -62,7 +62,7 @@ func (s *Service) CreateDevice(ctx context.Context, req CreateDeviceRequest) (Cr
 		return CreateDeviceResponse{}, huma.Error500InternalServerError("failed to generate device id", err)
 	}
 	row := model.Devices{
-		ID:                   &id,
+		ID:                   id,
 		Name:                 req.Name,
 		Slug:                 req.Slug,
 		ScreenWidth:          req.ScreenWidth,

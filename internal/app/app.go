@@ -23,6 +23,7 @@ import (
 	"github.com/walens/walens/internal/logger"
 	"github.com/walens/walens/internal/queue"
 	"github.com/walens/walens/internal/routes"
+	imagesroutes "github.com/walens/walens/internal/routes/images"
 	"github.com/walens/walens/internal/runner"
 	"github.com/walens/walens/internal/scheduler"
 	"github.com/walens/walens/internal/services/configs"
@@ -55,6 +56,7 @@ type App struct {
 	queue          *queue.Queue
 	runner         *runner.Runner
 	handler        http.Handler
+	api            huma.API
 }
 
 // New creates a new application instance.
@@ -240,9 +242,7 @@ func (a *App) recoverJobs(ctx context.Context) error {
 	// Collect job IDs for marking as recovery
 	jobIDs := make([]dbtypes.UUID, 0, len(jobsToRecover))
 	for _, job := range jobsToRecover {
-		if job.ID != nil {
-			jobIDs = append(jobIDs, *job.ID)
-		}
+		jobIDs = append(jobIDs, job.ID)
 	}
 
 	// Mark recovered jobs with trigger_kind=recovery
@@ -258,10 +258,8 @@ func (a *App) recoverJobs(ctx context.Context) error {
 	// Enqueue all recovered jobs in the in-memory queue
 	enqueuedCount := 0
 	for _, job := range jobsToRecover {
-		if job.ID != nil {
-			a.queue.Enqueue(job.ID.UUID.String())
-			enqueuedCount++
-		}
+		a.queue.Enqueue(job.ID.UUID.String())
+		enqueuedCount++
 	}
 
 	a.logger.Info("boot recovery: enqueued jobs to in-memory queue", "count", enqueuedCount)
@@ -339,10 +337,12 @@ func (a *App) buildHTTPHandler() http.Handler {
 	}
 	a.sourcesService = sourcesvc.NewService(a.db, a.sourceRegistry)
 	humaConfig := huma.DefaultConfig("Walens API", "0.0.1")
+	humaConfig.FieldsOptionalByDefault = true
 	humaConfig.OpenAPIPath = joinPath(basePath, "/openapi")
 	humaConfig.DocsPath = joinPath(basePath, "/docs")
 	humaConfig.SchemasPath = joinPath(basePath, "/schemas")
 	api := humago.New(mux, humaConfig)
+	a.api = api
 
 	// Build auth config for middleware
 	authConfig := auth.Config{
@@ -355,6 +355,18 @@ func (a *App) buildHTTPHandler() http.Handler {
 	}
 
 	a.registerHumaRoutes(api, basePath, authConfig)
+
+	// Enhance OpenAPI spec for codegen friendliness: title case tags, stable operation IDs, README overview
+	a.enhanceOpenAPISpec()
+
+	// Mount direct image/thumbnail HTTP GET handlers on mux (before API handler wrapping)
+	// These serve actual image files directly without going through Huma RPC
+	// Use the same db that was passed to Huma routes for consistency
+	imageSvcForHandlers := images.NewService(a.db)
+	thumbHandler := &imagesroutes.ServeThumbnailHandler{BasePath: basePath, ImageSvc: imageSvcForHandlers}
+	imageHandler := &imagesroutes.ServeImageHandler{BasePath: basePath, ImageSvc: imageSvcForHandlers}
+	mux.Handle(thumbHandler.Pattern(), thumbHandler)
+	mux.Handle(imageHandler.Pattern(), imageHandler)
 
 	// Create the API handler with auth context
 	var apiHandler http.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -452,12 +464,12 @@ func (i *logoutInput) Resolve(ctx huma.Context) []error {
 
 func (a *App) registerHumaRoutes(api huma.API, basePath string, authConfig auth.Config) {
 	huma.Register(api, huma.Operation{
-		OperationID: "get-health",
+		OperationID: "GetHealth",
 		Method:      http.MethodGet,
 		Path:        joinPath(basePath, "health"),
 		Summary:     "Get application health",
 		Description: "Returns Walens process health, including database availability and current in-memory queue size for infrastructure monitoring.",
-		Tags:        []string{"infra"},
+		Tags:        []string{"Infra"},
 	}, func(ctx context.Context, input *struct{}) (*healthOutput, error) {
 		output := &healthOutput{}
 		output.Body.QueueSize = a.queue.Size()
@@ -481,12 +493,12 @@ func (a *App) registerHumaRoutes(api huma.API, basePath string, authConfig auth.
 	})
 
 	huma.Register(api, huma.Operation{
-		OperationID: "post-login",
+		OperationID: "Login",
 		Method:      http.MethodPost,
 		Path:        joinPath(basePath, "/api/login"),
 		Summary:     "Bootstrap browser auth cookie",
 		Description: "Validates bootstrap Basic Auth credentials and sets an HTTP-only auth cookie for browser clients. Native or external clients should use the Authorization header directly instead of this endpoint.",
-		Tags:        []string{"auth"},
+		Tags:        []string{"Auth"},
 	}, func(ctx context.Context, input *loginInput) (*loginOutput, error) {
 		if err := authConfig.ValidateCredentials(input.Body.Username, input.Body.Password); err != nil {
 			return nil, huma.Error401Unauthorized("invalid credentials")
@@ -505,12 +517,12 @@ func (a *App) registerHumaRoutes(api huma.API, basePath string, authConfig auth.
 	})
 
 	huma.Register(api, huma.Operation{
-		OperationID: "post-logout",
+		OperationID: "Logout",
 		Method:      http.MethodPost,
 		Path:        joinPath(basePath, "/api/logout"),
 		Summary:     "Clear browser auth cookie",
 		Description: "Clears the HTTP-only browser auth cookie. Header-based clients should simply stop sending Authorization credentials.",
-		Tags:        []string{"auth"},
+		Tags:        []string{"Auth"},
 	}, func(ctx context.Context, input *logoutInput) (*logoutOutput, error) {
 		return &logoutOutput{}, nil
 	})
@@ -535,9 +547,124 @@ func (a *App) registerHumaRoutes(api huma.API, basePath string, authConfig auth.
 
 	// Register images RPC routes
 	routes.RegisterImagesRoutes(api, basePath, a.db)
+
+	// Register jobs RPC routes
+	routes.RegisterJobsRoutes(api, basePath, a.db)
+
+	// Register runtime status routes
+	if a.scheduler != nil {
+		statusDeps := &appRuntimeStatusDeps{
+			app: a,
+		}
+		routes.RegisterRuntimeStatusRoutes(api, basePath, statusDeps)
+	}
 }
 
-// startHTTPServer configures and starts the HTTP server with health endpoint.
+// appRuntimeStatusDeps implements runtime_status.RuntimeStatusDeps using the App struct.
+type appRuntimeStatusDeps struct {
+	app *App
+}
+
+func (d *appRuntimeStatusDeps) QueueSize() int {
+	if d.app.queue == nil {
+		return 0
+	}
+	return d.app.queue.Size()
+}
+
+func (d *appRuntimeStatusDeps) SchedulerReady() bool {
+	if d.app.scheduler == nil {
+		return false
+	}
+	return d.app.scheduler.IsReady()
+}
+
+func (d *appRuntimeStatusDeps) GetScheduleCount() int {
+	if d.app.scheduler == nil {
+		return 0
+	}
+	return d.app.scheduler.GetScheduleCount()
+}
+
+func (d *appRuntimeStatusDeps) IsRunnerActive() bool {
+	// Runner is considered active if context is not nil (has been started and not stopped)
+	return d.app.runner != nil
+}
+
+func (d *appRuntimeStatusDeps) IsAuthEnabled() bool {
+	return d.app.config.Auth.Enabled
+}
+
+// enhanceOpenAPISpec adds tag descriptions and README overview to the OpenAPI spec.
+// Tags and OperationIDs are set directly in route files.
+func (a *App) enhanceOpenAPISpec() {
+	if a.api == nil {
+		return
+	}
+
+	// Read README.md for OpenAPI description/overview
+	readmeContent := ""
+	if data, err := os.ReadFile("README.md"); err == nil {
+		readmeContent = strings.TrimSpace(string(data))
+	}
+
+	openapi := a.api.OpenAPI()
+	if openapi == nil {
+		return
+	}
+
+	// Set README as OpenAPI description if available
+	if readmeContent != "" {
+		openapi.Info.Description = readmeContent
+	}
+
+	// Tag descriptions for API docs
+	tagDescriptions := map[string]string{
+		"Auth":                 "Authentication and session management",
+		"Configs":              "Application configuration persistence",
+		"Device Subscriptions": "Device-to-source subscription management",
+		"Devices":              "Device registration and management",
+		"Images":               "Image metadata, thumbnails, and serving",
+		"Infra":                "Health checks and infrastructure monitoring",
+		"Jobs":                 "Background job status and history",
+		"Runtime Status":       "Runtime state of scheduler, queue, and runner",
+		"Source Schedules":     "Cron-based source fetch scheduling",
+		"Source Types":         "Registered source implementation types",
+		"Sources":              "Configured wallpaper source instances",
+	}
+
+	// Add tag descriptions to OpenAPI spec
+	for _, pathItem := range openapi.Paths {
+		a.addTagDescription(pathItem.Get, tagDescriptions)
+		a.addTagDescription(pathItem.Post, tagDescriptions)
+		a.addTagDescription(pathItem.Put, tagDescriptions)
+		a.addTagDescription(pathItem.Delete, tagDescriptions)
+		a.addTagDescription(pathItem.Patch, tagDescriptions)
+	}
+}
+
+// addTagDescription adds description to the first tag found in an operation.
+func (a *App) addTagDescription(op *huma.Operation, tagDescriptions map[string]string) {
+	if op == nil || len(op.Tags) == 0 {
+		return
+	}
+	tag := op.Tags[0]
+	if desc, ok := tagDescriptions[tag]; ok {
+		// Check if tag already exists in OpenAPI tags
+		found := false
+		for i, t := range a.api.OpenAPI().Tags {
+			if t.Name == tag {
+				a.api.OpenAPI().Tags[i].Description = desc
+				found = true
+				break
+			}
+		}
+		if !found {
+			a.api.OpenAPI().Tags = append(a.api.OpenAPI().Tags, &huma.Tag{Name: tag, Description: desc})
+		}
+	}
+}
+
 func (a *App) startHTTPServer(ctx context.Context) error {
 	basePath := a.config.Server.BasePath
 	a.handler = a.buildHTTPHandler()

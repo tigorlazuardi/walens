@@ -401,7 +401,7 @@ func TestPrecheckAndStartJob_SkippedForNonSourceSyncJobs(t *testing.T) {
 	}
 
 	// Precheck should skip and start the job directly
-	started, canProceed, err := svc.PrecheckAndStartJob(ctx, *job.ID)
+	started, canProceed, err := svc.PrecheckAndStartJob(ctx, job.ID)
 	if err != nil {
 		t.Fatalf("PrecheckAndStartJob failed: %v", err)
 	}
@@ -435,7 +435,7 @@ func TestPrecheckAndStartJob_SkippedForSourceSyncWithoutSourceID(t *testing.T) {
 	}
 
 	// Precheck should skip and start the job directly (no source_id)
-	started, canProceed, err := svc.PrecheckAndStartJob(ctx, *job.ID)
+	started, canProceed, err := svc.PrecheckAndStartJob(ctx, job.ID)
 	if err != nil {
 		t.Fatalf("PrecheckAndStartJob failed: %v", err)
 	}
@@ -476,7 +476,7 @@ func TestPrecheckAndStartJob_FailsAndCompletesWhenSourceDisabled(t *testing.T) {
 	}
 
 	// Precheck should fail and complete the job immediately
-	completed, canProceed, err := svc.PrecheckAndStartJob(ctx, *job.ID)
+	completed, canProceed, err := svc.PrecheckAndStartJob(ctx, job.ID)
 	if err != nil {
 		t.Fatalf("PrecheckAndStartJob failed: %v", err)
 	}
@@ -524,7 +524,7 @@ func TestPrecheckAndStartJob_FailsAndCompletesWhenNoSubscriptions(t *testing.T) 
 	}
 
 	// Precheck should fail and complete the job immediately
-	completed, canProceed, err := svc.PrecheckAndStartJob(ctx, *job.ID)
+	completed, canProceed, err := svc.PrecheckAndStartJob(ctx, job.ID)
 	if err != nil {
 		t.Fatalf("PrecheckAndStartJob failed: %v", err)
 	}
@@ -578,7 +578,7 @@ func TestPrecheckAndStartJob_PassesAndStartsWhenAllEnabled(t *testing.T) {
 	}
 
 	// Precheck should pass and start the job
-	started, canProceed, err := svc.PrecheckAndStartJob(ctx, *job.ID)
+	started, canProceed, err := svc.PrecheckAndStartJob(ctx, job.ID)
 	if err != nil {
 		t.Fatalf("PrecheckAndStartJob failed: %v", err)
 	}
@@ -638,7 +638,7 @@ func TestPrecheckAndStartJob_ScheduleTrigger_SkippedWhenNoEnabledDevices(t *test
 	}
 
 	// Precheck should fail and complete the job immediately
-	completed, canProceed, err := svc.PrecheckAndStartJob(ctx, *job.ID)
+	completed, canProceed, err := svc.PrecheckAndStartJob(ctx, job.ID)
 	if err != nil {
 		t.Fatalf("PrecheckAndStartJob failed: %v", err)
 	}
@@ -692,7 +692,7 @@ func TestPrecheckAndStartJob_ScheduleTrigger_PassesWhenAllEnabled(t *testing.T) 
 	}
 
 	// Precheck should pass and start the job
-	started, canProceed, err := svc.PrecheckAndStartJob(ctx, *job.ID)
+	started, canProceed, err := svc.PrecheckAndStartJob(ctx, job.ID)
 	if err != nil {
 		t.Fatalf("PrecheckAndStartJob failed: %v", err)
 	}
@@ -805,12 +805,12 @@ func TestGetJob(t *testing.T) {
 	}
 
 	// Get the job
-	job, err := svc.GetJob(ctx, GetJobRequest{ID: *created.ID})
+	job, err := svc.GetJob(ctx, GetJobRequest{ID: created.ID})
 	if err != nil {
 		t.Fatalf("GetJob failed: %v", err)
 	}
 
-	if job.ID == nil || created.ID == nil || job.ID.UUID != created.ID.UUID {
+	if job.ID.UUID != created.ID.UUID {
 		t.Error("job ID mismatch")
 	}
 	if job.JobType != JobTypeSourceDownload {
@@ -886,10 +886,10 @@ func TestListJobsWithFilter(t *testing.T) {
 
 		switch status {
 		case StatusRunning:
-			_, _ = svc.StartJob(ctx, StartJobRequest{ID: *job.ID})
+			_, _ = svc.StartJob(ctx, StartJobRequest{ID: job.ID})
 		case StatusSucceeded:
-			_, _ = svc.StartJob(ctx, StartJobRequest{ID: *job.ID})
-			_, _ = svc.CompleteJob(ctx, CompleteJobRequest{ID: *job.ID, Message: nil, JSONResult: nil})
+			_, _ = svc.StartJob(ctx, StartJobRequest{ID: job.ID})
+			_, _ = svc.CompleteJob(ctx, CompleteJobRequest{ID: job.ID, Message: nil, JSONResult: nil})
 		}
 	}
 
@@ -938,7 +938,7 @@ func TestListJobs_TotalCount(t *testing.T) {
 			RunAfter:    time.Now().UTC(),
 		}
 		job, _ := svc.CreateJob(ctx, *input)
-		svc.StartJob(ctx, StartJobRequest{ID: *job.ID})
+		svc.StartJob(ctx, StartJobRequest{ID: job.ID})
 	}
 
 	// Test: Total should be 8 for all jobs
@@ -1024,7 +1024,7 @@ func TestStartJob(t *testing.T) {
 	job, _ := svc.CreateJob(ctx, *input)
 
 	// Start the job
-	started, err := svc.StartJob(ctx, StartJobRequest{ID: *job.ID})
+	started, err := svc.StartJob(ctx, StartJobRequest{ID: job.ID})
 	if err != nil {
 		t.Fatalf("StartJob failed: %v", err)
 	}
@@ -1052,11 +1052,11 @@ func TestStartJobInvalidTransition(t *testing.T) {
 		RunAfter:    time.Now().UTC(),
 	}
 	job, _ := svc.CreateJob(ctx, *input)
-	svc.StartJob(ctx, StartJobRequest{ID: *job.ID})
-	svc.CompleteJob(ctx, CompleteJobRequest{ID: *job.ID, Message: nil, JSONResult: nil})
+	svc.StartJob(ctx, StartJobRequest{ID: job.ID})
+	svc.CompleteJob(ctx, CompleteJobRequest{ID: job.ID, Message: nil, JSONResult: nil})
 
 	// Try to start completed job
-	_, err := svc.StartJob(ctx, StartJobRequest{ID: *job.ID})
+	_, err := svc.StartJob(ctx, StartJobRequest{ID: job.ID})
 	assertHumaErrorStatus(t, err, 400)
 }
 
@@ -1075,12 +1075,12 @@ func TestCompleteJob(t *testing.T) {
 		RunAfter:    time.Now().UTC(),
 	}
 	job, _ := svc.CreateJob(ctx, *input)
-	svc.StartJob(ctx, StartJobRequest{ID: *job.ID})
+	svc.StartJob(ctx, StartJobRequest{ID: job.ID})
 
 	// Complete the job
 	message := "Job completed successfully"
 	result := json.RawMessage(`{"images_processed": 10}`)
-	completed, err := svc.CompleteJob(ctx, CompleteJobRequest{ID: *job.ID, Message: &message, JSONResult: result})
+	completed, err := svc.CompleteJob(ctx, CompleteJobRequest{ID: job.ID, Message: &message, JSONResult: result})
 	if err != nil {
 		t.Fatalf("CompleteJob failed: %v", err)
 	}
@@ -1114,12 +1114,12 @@ func TestFailJob(t *testing.T) {
 		RunAfter:    time.Now().UTC(),
 	}
 	job, _ := svc.CreateJob(ctx, *input)
-	svc.StartJob(ctx, StartJobRequest{ID: *job.ID})
+	svc.StartJob(ctx, StartJobRequest{ID: job.ID})
 
 	// Fail the job
 	errorMsg := "Network timeout"
 	result := json.RawMessage(`{"error_code": "TIMEOUT"}`)
-	failed, err := svc.FailJob(ctx, FailJobRequest{ID: *job.ID, ErrorMessage: errorMsg, JSONResult: result})
+	failed, err := svc.FailJob(ctx, FailJobRequest{ID: job.ID, ErrorMessage: errorMsg, JSONResult: result})
 	if err != nil {
 		t.Fatalf("FailJob failed: %v", err)
 	}
@@ -1150,7 +1150,7 @@ func TestCancelJob(t *testing.T) {
 
 	// Cancel the job
 	message := "Cancelled by user"
-	cancelled, err := svc.CancelJob(ctx, CancelJobRequest{ID: *job.ID, Message: &message})
+	cancelled, err := svc.CancelJob(ctx, CancelJobRequest{ID: job.ID, Message: &message})
 	if err != nil {
 		t.Fatalf("CancelJob failed: %v", err)
 	}
@@ -1175,12 +1175,12 @@ func TestIncrementJobCounters(t *testing.T) {
 		RunAfter:    time.Now().UTC(),
 	}
 	job, _ := svc.CreateJob(ctx, *input)
-	svc.StartJob(ctx, StartJobRequest{ID: *job.ID})
+	svc.StartJob(ctx, StartJobRequest{ID: job.ID})
 
 	// Increment counters
 	downloaded := int64(5)
 	reused := int64(3)
-	updated, err := svc.IncrementJobCounters(ctx, IncrementJobCountersRequest{ID: *job.ID, Deltas: UpdateJobCountersRequest{
+	updated, err := svc.IncrementJobCounters(ctx, IncrementJobCountersRequest{ID: job.ID, Deltas: UpdateJobCountersRequest{
 		DownloadedImageCount: &downloaded,
 		ReusedImageCount:     &reused,
 	}})
@@ -1197,7 +1197,7 @@ func TestIncrementJobCounters(t *testing.T) {
 
 	// Increment again
 	downloaded2 := int64(2)
-	updated2, err := svc.IncrementJobCounters(ctx, IncrementJobCountersRequest{ID: *job.ID, Deltas: UpdateJobCountersRequest{
+	updated2, err := svc.IncrementJobCounters(ctx, IncrementJobCountersRequest{ID: job.ID, Deltas: UpdateJobCountersRequest{
 		DownloadedImageCount: &downloaded2,
 	}})
 	if err != nil {
@@ -1227,7 +1227,7 @@ func TestIncrementJobCountersNotRunning(t *testing.T) {
 
 	// Try to increment counters
 	downloaded := int64(5)
-	_, err := svc.IncrementJobCounters(ctx, IncrementJobCountersRequest{ID: *job.ID, Deltas: UpdateJobCountersRequest{
+	_, err := svc.IncrementJobCounters(ctx, IncrementJobCountersRequest{ID: job.ID, Deltas: UpdateJobCountersRequest{
 		DownloadedImageCount: &downloaded,
 	}})
 	assertHumaErrorStatus(t, err, 400)
@@ -1251,7 +1251,7 @@ func TestRecoverRunningJobs(t *testing.T) {
 		job, _ := svc.CreateJob(ctx, *input)
 		if i == 0 {
 			// Start one job
-			svc.StartJob(ctx, StartJobRequest{ID: *job.ID})
+			svc.StartJob(ctx, StartJobRequest{ID: job.ID})
 		}
 	}
 
@@ -1292,7 +1292,7 @@ func TestGetJobsForRecovery(t *testing.T) {
 	}
 	queuedJob, _ := svc.CreateJob(ctx, *input)
 	runningJob, _ := svc.CreateJob(ctx, *input)
-	svc.StartJob(ctx, StartJobRequest{ID: *runningJob.ID})
+	svc.StartJob(ctx, StartJobRequest{ID: runningJob.ID})
 
 	// Get jobs for recovery
 	jobs, err := svc.GetJobsForRecovery(ctx)
@@ -1308,10 +1308,10 @@ func TestGetJobsForRecovery(t *testing.T) {
 	foundQueued := false
 	foundRunning := false
 	for _, job := range jobs {
-		if job.ID != nil && queuedJob.ID != nil && job.ID.UUID.String() == queuedJob.ID.UUID.String() {
+		if job.ID.UUID.String() == queuedJob.ID.UUID.String() {
 			foundQueued = true
 		}
-		if job.ID != nil && runningJob.ID != nil && job.ID.UUID.String() == runningJob.ID.UUID.String() {
+		if job.ID.UUID.String() == runningJob.ID.UUID.String() {
 			foundRunning = true
 		}
 	}

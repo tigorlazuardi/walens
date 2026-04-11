@@ -11,12 +11,12 @@ import (
 // CreateDeviceOperation returns the Huma operation metadata for CreateDevice.
 func CreateDeviceOperation(basePath string) huma.Operation {
 	return huma.Operation{
-		OperationID: "post-devices-create-device",
+		OperationID: "CreateDevice",
 		Method:      "POST",
 		Path:        path.Join(basePath, "/api/v1/devices/CreateDevice"),
 		Summary:     "Create a new device",
 		Description: "Creates a new device row with screen constraints, image bounds, filesize bounds, and adult-content preferences.",
-		Tags:        []string{"devices"},
+		Tags:        []string{"Devices"},
 	}
 }
 

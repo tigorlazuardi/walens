@@ -83,10 +83,12 @@ func (s *Service) ListSchedules(ctx context.Context, req ListSchedulesRequest) (
 		slices.Reverse(items)
 	}
 	if hasMore {
-		cursor.Next = items[len(items)-1].ID
+		nextID := items[len(items)-1].ID
+		cursor.Next = &nextID
 	}
 	if next != "" {
-		cursor.Prev = items[0].ID
+		prevID := items[0].ID
+		cursor.Prev = &prevID
 	}
 	return ListSchedulesResponse{Items: items, Pagination: cursor, Total: total}, nil
 }

@@ -12,10 +12,10 @@ import (
 )
 
 type SourceSchedules struct {
-	ID        *dbtypes.UUID         `sql:"primary_key" json:"id" doc:"Unique schedule identifier (UUIDv7)"`
-	SourceID  dbtypes.UUID          `json:"source_id" doc:"Reference to parent source"`
-	CronExpr  string                `json:"cron_expr" doc:"Five-field cron expression (minute, hour, day, month, weekday)"`
-	IsEnabled dbtypes.BoolInt       `json:"is_enabled" doc:"Whether this schedule is active"`
-	CreatedAt dbtypes.UnixMilliTime `json:"created_at" doc:"Schedule creation timestamp"`
-	UpdatedAt dbtypes.UnixMilliTime `json:"updated_at" doc:"Last modification timestamp"`
+	ID        dbtypes.UUID          `sql:"primary_key" doc:"Unique schedule identifier (UUIDv7)" required:"true" json:"id",omitzero`
+	SourceID  dbtypes.UUID          `doc:"Reference to parent source" required:"true" json:"source_id",omitzero`
+	CronExpr  string                `doc:"Five-field cron expression (minute, hour, day, month, weekday)" required:"true" json:"cron_expr",omitzero`
+	IsEnabled dbtypes.BoolInt       `doc:"Whether this schedule is active" required:"true" json:"is_enabled",omitzero`
+	CreatedAt dbtypes.UnixMilliTime `doc:"Schedule creation timestamp" required:"true" json:"created_at",omitzero`
+	UpdatedAt dbtypes.UnixMilliTime `doc:"Last modification timestamp" required:"true" json:"updated_at",omitzero`
 }

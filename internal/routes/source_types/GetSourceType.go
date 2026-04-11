@@ -14,12 +14,12 @@ type GetSourceTypeBody = sourcetypessvc.SourceTypeMetadata
 // GetSourceTypeOperation returns the Huma operation metadata for GetSourceType.
 func GetSourceTypeOperation(basePath string) huma.Operation {
 	return huma.Operation{
-		OperationID: "post-source-types-get-source-type",
+		OperationID: "GetSourceType",
 		Method:      "POST",
 		Path:        path.Join(basePath, "/api/v1/source_types/GetSourceType"),
 		Summary:     "Get a source type by name",
 		Description: "Returns metadata for a specific source type including type name, display name, default lookup count, and parameter schema.",
-		Tags:        []string{"source_types"},
+		Tags:        []string{"Source Types"},
 	}
 }
 

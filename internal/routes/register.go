@@ -9,6 +9,8 @@ import (
 	devsubroutes "github.com/walens/walens/internal/routes/device_subscriptions"
 	devicesroutes "github.com/walens/walens/internal/routes/devices"
 	imagesroutes "github.com/walens/walens/internal/routes/images"
+	jobsroutes "github.com/walens/walens/internal/routes/jobs"
+	runtimeroutes "github.com/walens/walens/internal/routes/runtime_status"
 	schedulesroutes "github.com/walens/walens/internal/routes/source_schedules"
 	sourcetypesroutes "github.com/walens/walens/internal/routes/source_types"
 	sourceroutes "github.com/walens/walens/internal/routes/sources"
@@ -17,6 +19,7 @@ import (
 	devsubsvc "github.com/walens/walens/internal/services/device_subscriptions"
 	devicessvc "github.com/walens/walens/internal/services/devices"
 	imagessvc "github.com/walens/walens/internal/services/images"
+	jobssvc "github.com/walens/walens/internal/services/jobs"
 	schedulessvc "github.com/walens/walens/internal/services/source_schedules"
 	sourcetypessvc "github.com/walens/walens/internal/services/source_types"
 	sourcessvc "github.com/walens/walens/internal/services/sources"
@@ -199,5 +202,38 @@ func RegisterImagesRoutes(api huma.API, basePath string, db *sql.DB) {
 
 	huma.Register(api, imagesroutes.GetImageThumbnailOperation(basePath), func(ctx context.Context, input *imagesroutes.GetImageThumbnailInput) (*imagesroutes.GetImageThumbnailOutput, error) {
 		return imagesroutes.GetImageThumbnail(ctx, input, imagesService)
+	})
+
+	huma.Register(api, imagesroutes.ServeImageOperation(basePath), func(ctx context.Context, input *imagesroutes.ServeImageInput) (*imagesroutes.ServeImageOutput, error) {
+		return imagesroutes.ServeImage(ctx, input, imagesService, basePath)
+	})
+
+	huma.Register(api, imagesroutes.ServeThumbnailOperation(basePath), func(ctx context.Context, input *imagesroutes.ServeThumbnailInput) (*imagesroutes.ServeThumbnailOutput, error) {
+		return imagesroutes.ServeThumbnail(ctx, input, imagesService, basePath)
+	})
+}
+
+// RegisterJobsRoutes registers all jobs RPC routes under /api/v1/jobs/.
+func RegisterJobsRoutes(api huma.API, basePath string, db *sql.DB) {
+	var jobsService *jobssvc.Service
+	if db != nil {
+		jobsService = jobssvc.NewService(db)
+	} else {
+		jobsService = jobssvc.NewService(nil)
+	}
+
+	huma.Register(api, jobsroutes.ListJobsOperation(basePath), func(ctx context.Context, input *jobsroutes.ListJobsInput) (*jobsroutes.ListJobsOutput, error) {
+		return jobsroutes.ListJobs(ctx, input, jobsService)
+	})
+
+	huma.Register(api, jobsroutes.GetJobOperation(basePath), func(ctx context.Context, input *jobsroutes.GetJobInput) (*jobsroutes.GetJobOutput, error) {
+		return jobsroutes.GetJob(ctx, input, jobsService)
+	})
+}
+
+// RegisterRuntimeStatusRoutes registers runtime status routes.
+func RegisterRuntimeStatusRoutes(api huma.API, basePath string, deps runtimeroutes.RuntimeStatusDeps) {
+	huma.Register(api, runtimeroutes.GetRuntimeStatusOperation(basePath), func(ctx context.Context, input *struct{}) (*runtimeroutes.RuntimeStatusOutput, error) {
+		return runtimeroutes.GetRuntimeStatus(ctx, input, deps)
 	})
 }

@@ -12,9 +12,9 @@ import (
 )
 
 type ImageAssignments struct {
-	ID        *dbtypes.UUID         `sql:"primary_key" json:"id" doc:"Unique assignment identifier (UUIDv7)"`
-	ImageID   dbtypes.UUID          `json:"image_id" doc:"Reference to assigned image"`
-	DeviceID  dbtypes.UUID          `json:"device_id" doc:"Reference to target device"`
-	CreatedAt dbtypes.UnixMilliTime `json:"created_at" doc:"Assignment creation timestamp"`
-	UpdatedAt dbtypes.UnixMilliTime `json:"updated_at" doc:"Last modification timestamp"`
+	ID        dbtypes.UUID          `sql:"primary_key" doc:"Unique assignment identifier (UUIDv7)" required:"true" json:"id",omitzero`
+	ImageID   dbtypes.UUID          `doc:"Reference to assigned image" required:"true" json:"image_id",omitzero`
+	DeviceID  dbtypes.UUID          `doc:"Reference to target device" required:"true" json:"device_id",omitzero`
+	CreatedAt dbtypes.UnixMilliTime `doc:"Assignment creation timestamp" required:"true" json:"created_at",omitzero`
+	UpdatedAt dbtypes.UnixMilliTime `doc:"Last modification timestamp" required:"true" json:"updated_at",omitzero`
 }

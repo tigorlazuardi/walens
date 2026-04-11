@@ -13,7 +13,7 @@ import (
 
 type GooseDbVersion struct {
 	ID        *int64          `sql:"primary_key" json:"id"`
-	VersionID int64           `json:"version_id"`
-	IsApplied dbtypes.BoolInt `json:"is_applied"`
+	VersionID int64           `required:"true" json:"version_id",omitzero`
+	IsApplied dbtypes.BoolInt `required:"true" json:"is_applied",omitzero`
 	Tstamp    *string         `json:"tstamp"`
 }

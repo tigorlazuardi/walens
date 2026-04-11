@@ -13,12 +13,12 @@ type PersistedConfig = configsvc.PersistedConfig
 // GetConfigOperation returns the Huma operation metadata for GetConfig.
 func GetConfigOperation(basePath string) huma.Operation {
 	return huma.Operation{
-		OperationID: "post-configs-get-config",
+		OperationID: "GetConfig",
 		Method:      "POST",
 		Path:        path.Join(basePath, "/api/v1/configs/GetConfig"),
 		Summary:     "Get persisted config",
 		Description: "Returns the current persisted configuration. Initializes defaults if no config exists. Note: BasePath and Auth settings are bootstrap-only and not included.",
-		Tags:        []string{"configs"},
+		Tags:        []string{"Configs"},
 	}
 }
 

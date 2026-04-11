@@ -11,12 +11,12 @@ import (
 // ListDeviceImagesOperation returns the Huma operation metadata for ListDeviceImages.
 func ListDeviceImagesOperation(basePath string) huma.Operation {
 	return huma.Operation{
-		OperationID: "post-images-list-device-images",
+		OperationID: "ListDeviceImages",
 		Method:      "POST",
 		Path:        path.Join(basePath, "/api/v1/images/ListDeviceImages"),
 		Summary:     "List images for a specific device",
 		Description: "Returns images that match a specific device according to the device's subscription, dimension, filesize, and adult constraints.",
-		Tags:        []string{"images"},
+		Tags:        []string{"Images"},
 	}
 }
 

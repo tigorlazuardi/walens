@@ -59,7 +59,7 @@ func (s *Service) createImageTag(ctx context.Context, imageID, tagID dbtypes.UUI
 	id := dbtypes.MustNewUUIDV7()
 
 	row := model.ImageTags{
-		ID:        &id,
+		ID:        id,
 		ImageID:   imageID,
 		TagID:     tagID,
 		CreatedAt: now,

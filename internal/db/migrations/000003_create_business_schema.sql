@@ -6,7 +6,7 @@
 
 -- devices table: user-managed wallpaper consumer devices.
 CREATE TABLE IF NOT EXISTS devices (
-    id TEXT PRIMARY KEY,
+    id TEXT PRIMARY KEY NOT NULL,
     name TEXT NOT NULL,
     slug TEXT NOT NULL,
     screen_width INTEGER NOT NULL,
@@ -28,7 +28,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_devices_slug ON devices(slug);
 
 -- sources table: user-created configured source rows.
 CREATE TABLE IF NOT EXISTS sources (
-    id TEXT PRIMARY KEY,
+    id TEXT PRIMARY KEY NOT NULL,
     name TEXT NOT NULL,
     source_type TEXT NOT NULL,
     params TEXT NOT NULL DEFAULT '{}',
@@ -42,7 +42,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_sources_name ON sources(name);
 
 -- source_schedules table: cron schedules for source rows.
 CREATE TABLE IF NOT EXISTS source_schedules (
-    id TEXT PRIMARY KEY,
+    id TEXT PRIMARY KEY NOT NULL,
     source_id TEXT NOT NULL,
     cron_expr TEXT NOT NULL,
     is_enabled INTEGER NOT NULL DEFAULT 1,
@@ -55,7 +55,7 @@ CREATE INDEX IF NOT EXISTS idx_source_schedules_source_id ON source_schedules(so
 
 -- device_source_subscriptions table: connects devices to source rows.
 CREATE TABLE IF NOT EXISTS device_source_subscriptions (
-    id TEXT PRIMARY KEY,
+    id TEXT PRIMARY KEY NOT NULL,
     device_id TEXT NOT NULL,
     source_id TEXT NOT NULL,
     is_enabled INTEGER NOT NULL DEFAULT 1,
@@ -69,7 +69,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_device_source_subscriptions_device_source 
 
 -- images table: canonical downloaded image identity records.
 CREATE TABLE IF NOT EXISTS images (
-    id TEXT PRIMARY KEY,
+    id TEXT PRIMARY KEY NOT NULL,
     source_id TEXT,
     unique_identifier TEXT NOT NULL,
     source_type TEXT NOT NULL,
@@ -98,7 +98,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_images_unique_identifier ON images(source_
 
 -- tags table: normalized tag names.
 CREATE TABLE IF NOT EXISTS tags (
-    id TEXT PRIMARY KEY,
+    id TEXT PRIMARY KEY NOT NULL,
     name TEXT NOT NULL,
     normalized_name TEXT NOT NULL,
     created_at INTEGER NOT NULL,
@@ -109,7 +109,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_tags_normalized_name ON tags(normalized_na
 
 -- image_tags table: join between images and tags.
 CREATE TABLE IF NOT EXISTS image_tags (
-    id TEXT PRIMARY KEY,
+    id TEXT PRIMARY KEY NOT NULL,
     image_id TEXT NOT NULL,
     tag_id TEXT NOT NULL,
     created_at INTEGER NOT NULL,
@@ -121,7 +121,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_image_tags_image_tag ON image_tags(image_i
 
 -- image_assignments table: tracks which devices an image is assigned to.
 CREATE TABLE IF NOT EXISTS image_assignments (
-    id TEXT PRIMARY KEY,
+    id TEXT PRIMARY KEY NOT NULL,
     image_id TEXT NOT NULL,
     device_id TEXT NOT NULL,
     created_at INTEGER NOT NULL,
@@ -134,7 +134,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_image_assignments_image_device ON image_as
 
 -- image_locations table: tracks concrete file paths on disk for images.
 CREATE TABLE IF NOT EXISTS image_locations (
-    id TEXT PRIMARY KEY,
+    id TEXT PRIMARY KEY NOT NULL,
     image_id TEXT NOT NULL,
     device_id TEXT NOT NULL,
     path TEXT NOT NULL,
@@ -153,7 +153,7 @@ CREATE INDEX IF NOT EXISTS idx_image_locations_device_id ON image_locations(devi
 
 -- image_thumbnails table: generated thumbnail files derived from images.
 CREATE TABLE IF NOT EXISTS image_thumbnails (
-    id TEXT PRIMARY KEY,
+    id TEXT PRIMARY KEY NOT NULL,
     image_id TEXT NOT NULL,
     path TEXT NOT NULL,
     width INTEGER NOT NULL,
@@ -169,7 +169,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_image_thumbnails_path ON image_thumbnails(
 
 -- image_blacklists table: blocks download of unwanted images by source+identifier.
 CREATE TABLE IF NOT EXISTS image_blacklists (
-    id TEXT PRIMARY KEY,
+    id TEXT PRIMARY KEY NOT NULL,
     source_id TEXT NOT NULL,
     unique_identifier TEXT NOT NULL,
     reason TEXT,
@@ -182,7 +182,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_image_blacklists_source_identifier ON imag
 
 -- jobs table: persisted execution records for source sync/download jobs.
 CREATE TABLE IF NOT EXISTS jobs (
-    id TEXT PRIMARY KEY,
+    id TEXT PRIMARY KEY NOT NULL,
     job_type TEXT NOT NULL,
     source_id TEXT,
     source_name TEXT,

@@ -12,13 +12,13 @@ import (
 )
 
 type ImageLocations struct {
-	ID          *dbtypes.UUID         `sql:"primary_key" json:"id" doc:"Unique location identifier (UUIDv7)"`
-	ImageID     dbtypes.UUID          `json:"image_id" doc:"Reference to image"`
-	DeviceID    dbtypes.UUID          `json:"device_id" doc:"Reference to device this path is for"`
-	Path        string                `json:"path" doc:"Absolute filesystem path to the image file"`
-	StorageKind string                `json:"storage_kind" doc:"Storage type: canonical, hardlink, or copy"`
-	IsPrimary   dbtypes.BoolInt       `json:"is_primary" doc:"Whether this is the primary device location"`
-	IsActive    dbtypes.BoolInt       `json:"is_active" doc:"Whether this location is currently active"`
-	CreatedAt   dbtypes.UnixMilliTime `json:"created_at" doc:"Location creation timestamp"`
-	UpdatedAt   dbtypes.UnixMilliTime `json:"updated_at" doc:"Last modification timestamp"`
+	ID          dbtypes.UUID          `sql:"primary_key" doc:"Unique location identifier (UUIDv7)" required:"true" json:"id",omitzero`
+	ImageID     dbtypes.UUID          `doc:"Reference to image" required:"true" json:"image_id",omitzero`
+	DeviceID    dbtypes.UUID          `doc:"Reference to device this path is for" required:"true" json:"device_id",omitzero`
+	Path        string                `doc:"Absolute filesystem path to the image file" required:"true" json:"path",omitzero`
+	StorageKind string                `doc:"Storage type: canonical, hardlink, or copy" required:"true" json:"storage_kind",omitzero`
+	IsPrimary   dbtypes.BoolInt       `doc:"Whether this is the primary device location" required:"true" json:"is_primary",omitzero`
+	IsActive    dbtypes.BoolInt       `doc:"Whether this location is currently active" required:"true" json:"is_active",omitzero`
+	CreatedAt   dbtypes.UnixMilliTime `doc:"Location creation timestamp" required:"true" json:"created_at",omitzero`
+	UpdatedAt   dbtypes.UnixMilliTime `doc:"Last modification timestamp" required:"true" json:"updated_at",omitzero`
 }

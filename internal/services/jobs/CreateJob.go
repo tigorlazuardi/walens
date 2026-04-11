@@ -25,7 +25,7 @@ func (s *Service) CreateJob(ctx context.Context, req CreateJobRequest) (JobRespo
 	}
 
 	job := model.Jobs{
-		ID:                   &id,
+		ID:                   id,
 		JobType:              req.JobType,
 		SourceID:             req.SourceID,
 		SourceName:           strPtr(req.SourceName),

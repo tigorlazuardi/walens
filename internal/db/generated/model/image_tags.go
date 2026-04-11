@@ -12,8 +12,8 @@ import (
 )
 
 type ImageTags struct {
-	ID        *dbtypes.UUID         `sql:"primary_key" json:"id" doc:"Unique join record identifier (UUIDv7)"`
-	ImageID   dbtypes.UUID          `json:"image_id" doc:"Reference to image"`
-	TagID     dbtypes.UUID          `json:"tag_id" doc:"Reference to tag"`
-	CreatedAt dbtypes.UnixMilliTime `json:"created_at" doc:"Tag assignment timestamp"`
+	ID        dbtypes.UUID          `sql:"primary_key" doc:"Unique join record identifier (UUIDv7)" required:"true" json:"id",omitzero`
+	ImageID   dbtypes.UUID          `doc:"Reference to image" required:"true" json:"image_id",omitzero`
+	TagID     dbtypes.UUID          `doc:"Reference to tag" required:"true" json:"tag_id",omitzero`
+	CreatedAt dbtypes.UnixMilliTime `doc:"Tag assignment timestamp" required:"true" json:"created_at",omitzero`
 }

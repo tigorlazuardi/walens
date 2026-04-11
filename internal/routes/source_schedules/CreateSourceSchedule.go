@@ -11,12 +11,12 @@ import (
 // CreateSourceScheduleOperation returns the Huma operation metadata for CreateSourceSchedule.
 func CreateSourceScheduleOperation(basePath string) huma.Operation {
 	return huma.Operation{
-		OperationID: "post-source_schedules-create-source_schedule",
+		OperationID: "CreateSourceSchedule",
 		Method:      "POST",
 		Path:        path.Join(basePath, "/api/v1/source_schedules/CreateSourceSchedule"),
 		Summary:     "Create a new source schedule",
 		Description: "Creates a new source schedule for a configured source. Cron expressions are validated at the API boundary.",
-		Tags:        []string{"source_schedules"},
+		Tags:        []string{"Source Schedules"},
 	}
 }
 

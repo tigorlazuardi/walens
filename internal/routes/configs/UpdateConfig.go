@@ -13,12 +13,12 @@ type UpdateConfigBody = configsvc.UpdateConfigRequest
 // UpdateConfigOperation returns the Huma operation metadata for UpdateConfig.
 func UpdateConfigOperation(basePath string) huma.Operation {
 	return huma.Operation{
-		OperationID: "post-configs-update-config",
+		OperationID: "UpdateConfig",
 		Method:      "POST",
 		Path:        path.Join(basePath, "/api/v1/configs/UpdateConfig"),
 		Summary:     "Update persisted config",
 		Description: "Atomically replaces the entire persisted configuration. Note: BasePath and Auth settings are bootstrap-only and cannot be changed via this endpoint.",
-		Tags:        []string{"configs"},
+		Tags:        []string{"Configs"},
 	}
 }
 

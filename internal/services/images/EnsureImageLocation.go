@@ -38,7 +38,7 @@ func (s *Service) EnsureImageLocation(ctx context.Context, req EnsureImageLocati
 		// No existing location - create new one
 		id := dbtypes.MustNewUUIDV7()
 		row := model.ImageLocations{
-			ID:          &id,
+			ID:          id,
 			ImageID:     req.ImageID,
 			DeviceID:    req.DeviceID,
 			Path:        req.Path,

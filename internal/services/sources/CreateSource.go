@@ -52,7 +52,7 @@ func (s *Service) CreateSource(ctx context.Context, req CreateSourceRequest) (Cr
 	}
 
 	row := model.Sources{
-		ID:          &id,
+		ID:          id,
 		Name:        req.Name,
 		SourceType:  req.SourceType,
 		Params:      dbtypes.RawJSON(req.Params),

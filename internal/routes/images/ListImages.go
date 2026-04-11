@@ -11,12 +11,12 @@ import (
 // ListImagesOperation returns the Huma operation metadata for ListImages.
 func ListImagesOperation(basePath string) huma.Operation {
 	return huma.Operation{
-		OperationID: "post-images-list-images",
+		OperationID: "ListImages",
 		Method:      "POST",
 		Path:        path.Join(basePath, "/api/v1/images/ListImages"),
 		Summary:     "List all images",
 		Description: "Returns all images matching the provided filters.",
-		Tags:        []string{"images"},
+		Tags:        []string{"Images"},
 	}
 }
 

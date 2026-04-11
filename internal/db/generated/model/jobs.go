@@ -12,28 +12,28 @@ import (
 )
 
 type Jobs struct {
-	ID                   *dbtypes.UUID              `sql:"primary_key" json:"id" doc:"Unique job identifier (UUIDv7)"`
-	JobType              string                     `json:"job_type" doc:"Job type: source_sync or source_download"`
-	SourceID             *dbtypes.UUID              `json:"source_id" doc:"Reference to source this job is for"`
-	SourceName           *string                    `json:"source_name" doc:"Denormalized source name for job history"`
-	SourceType           *string                    `json:"source_type" doc:"Denormalized source type for job history"`
-	Status               string                     `json:"status" doc:"Job status: queued, running, succeeded, failed, cancelled"`
-	TriggerKind          string                     `json:"trigger_kind" doc:"What triggered this job: manual, schedule, or recovery"`
-	RunAfter             dbtypes.UnixMilliTime      `json:"run_after" doc:"When the job should run (Unix milliseconds)"`
-	StartedAt            *dbtypes.UnixMilliTime     `json:"started_at" doc:"When the job actually started (Unix milliseconds)"`
-	FinishedAt           *dbtypes.UnixMilliTime     `json:"finished_at" doc:"When the job finished (Unix milliseconds)"`
-	DurationMs           *dbtypes.UnixMilliDuration `json:"duration_ms" doc:"Job execution duration in milliseconds"`
-	RequestedImageCount  int64                      `json:"requested_image_count" doc:"How many images were requested to fetch"`
-	DownloadedImageCount int64                      `json:"downloaded_image_count" doc:"How many images were actually downloaded"`
-	ReusedImageCount     int64                      `json:"reused_image_count" doc:"How many images were reused from existing files"`
-	HardlinkedImageCount int64                      `json:"hardlinked_image_count" doc:"How many images were hard-linked to new device paths"`
-	CopiedImageCount     int64                      `json:"copied_image_count" doc:"How many images were copied as fallback"`
-	StoredImageCount     int64                      `json:"stored_image_count" doc:"How many image records were persisted"`
-	SkippedImageCount    int64                      `json:"skipped_image_count" doc:"How many images were skipped during processing"`
-	Message              *string                    `json:"message" doc:"Informational message about the job result"`
-	ErrorMessage         *string                    `json:"error_message" doc:"Error message if the job failed"`
-	JSONInput            dbtypes.RawJSON            `json:"json_input" doc:"Job input parameters as JSON"`
-	JSONResult           dbtypes.RawJSON            `json:"json_result" doc:"Job result metadata as JSON"`
-	CreatedAt            dbtypes.UnixMilliTime      `json:"created_at" doc:"Job creation timestamp"`
-	UpdatedAt            dbtypes.UnixMilliTime      `json:"updated_at" doc:"Last modification timestamp"`
+	ID                   dbtypes.UUID               `sql:"primary_key" doc:"Unique job identifier (UUIDv7)" required:"true" json:"id",omitzero`
+	JobType              string                     `doc:"Job type: source_sync or source_download" required:"true" json:"job_type",omitzero`
+	SourceID             *dbtypes.UUID              `doc:"Reference to source this job is for" json:"source_id"`
+	SourceName           *string                    `doc:"Denormalized source name for job history" json:"source_name"`
+	SourceType           *string                    `doc:"Denormalized source type for job history" json:"source_type"`
+	Status               string                     `doc:"Job status: queued, running, succeeded, failed, cancelled" required:"true" json:"status",omitzero`
+	TriggerKind          string                     `doc:"What triggered this job: manual, schedule, or recovery" required:"true" json:"trigger_kind",omitzero`
+	RunAfter             dbtypes.UnixMilliTime      `doc:"When the job should run (Unix milliseconds)" required:"true" json:"run_after",omitzero`
+	StartedAt            *dbtypes.UnixMilliTime     `doc:"When the job actually started (Unix milliseconds)" json:"started_at"`
+	FinishedAt           *dbtypes.UnixMilliTime     `doc:"When the job finished (Unix milliseconds)" json:"finished_at"`
+	DurationMs           *dbtypes.UnixMilliDuration `doc:"Job execution duration in milliseconds" json:"duration_ms"`
+	RequestedImageCount  int64                      `doc:"How many images were requested to fetch" required:"true" json:"requested_image_count",omitzero`
+	DownloadedImageCount int64                      `doc:"How many images were actually downloaded" required:"true" json:"downloaded_image_count",omitzero`
+	ReusedImageCount     int64                      `doc:"How many images were reused from existing files" required:"true" json:"reused_image_count",omitzero`
+	HardlinkedImageCount int64                      `doc:"How many images were hard-linked to new device paths" required:"true" json:"hardlinked_image_count",omitzero`
+	CopiedImageCount     int64                      `doc:"How many images were copied as fallback" required:"true" json:"copied_image_count",omitzero`
+	StoredImageCount     int64                      `doc:"How many image records were persisted" required:"true" json:"stored_image_count",omitzero`
+	SkippedImageCount    int64                      `doc:"How many images were skipped during processing" required:"true" json:"skipped_image_count",omitzero`
+	Message              *string                    `doc:"Informational message about the job result" json:"message"`
+	ErrorMessage         *string                    `doc:"Error message if the job failed" json:"error_message"`
+	JSONInput            dbtypes.RawJSON            `doc:"Job input parameters as JSON" required:"true" json:"json_input",omitzero`
+	JSONResult           dbtypes.RawJSON            `doc:"Job result metadata as JSON" required:"true" json:"json_result",omitzero`
+	CreatedAt            dbtypes.UnixMilliTime      `doc:"Job creation timestamp" required:"true" json:"created_at",omitzero`
+	UpdatedAt            dbtypes.UnixMilliTime      `doc:"Last modification timestamp" required:"true" json:"updated_at",omitzero`
 }

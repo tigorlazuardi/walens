@@ -11,12 +11,12 @@ import (
 // GetSourceOperation returns the Huma operation metadata for GetSource.
 func GetSourceOperation(basePath string) huma.Operation {
 	return huma.Operation{
-		OperationID: "post-sources-get-source",
+		OperationID: "GetSource",
 		Method:      "POST",
 		Path:        path.Join(basePath, "/api/v1/sources/GetSource"),
 		Summary:     "Get a source by ID",
 		Description: "Returns a single configured source row by its ID.",
-		Tags:        []string{"sources"},
+		Tags:        []string{"Sources"},
 	}
 }
 

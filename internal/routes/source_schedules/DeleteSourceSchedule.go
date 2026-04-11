@@ -11,13 +11,13 @@ import (
 // DeleteSourceScheduleOperation returns the Huma operation metadata for DeleteSourceSchedule.
 func DeleteSourceScheduleOperation(basePath string) huma.Operation {
 	return huma.Operation{
-		OperationID:   "post-source_schedules-delete-source_schedule",
+		OperationID:   "DeleteSourceSchedule",
 		Method:        "POST",
 		Path:          path.Join(basePath, "/api/v1/source_schedules/DeleteSourceSchedule"),
 		DefaultStatus: 204,
 		Summary:       "Delete a source schedule by ID",
 		Description:   "Deletes a source schedule by its ID.",
-		Tags:          []string{"source_schedules"},
+		Tags:          []string{"Source Schedules"},
 	}
 }
 

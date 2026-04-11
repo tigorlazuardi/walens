@@ -86,10 +86,12 @@ func (s *Service) ListDevices(ctx context.Context, req ListDevicesRequest) (List
 		slices.Reverse(items)
 	}
 	if hasMore {
-		cursor.Next = items[len(items)-1].ID
+		nextID := items[len(items)-1].ID
+		cursor.Next = &nextID
 	}
 	if next != "" {
-		cursor.Prev = items[0].ID
+		prevID := items[0].ID
+		cursor.Prev = &prevID
 	}
 	return ListDevicesResponse{Items: items, Pagination: cursor, Total: total}, nil
 }

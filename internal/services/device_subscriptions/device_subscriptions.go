@@ -156,10 +156,12 @@ func (s *Service) ListSubscriptions(ctx context.Context, req ListSubscriptionsRe
 		slices.Reverse(items)
 	}
 	if hasMore {
-		cursor.Next = items[len(items)-1].ID
+		nextID := items[len(items)-1].ID
+		cursor.Next = &nextID
 	}
 	if next != "" {
-		cursor.Prev = items[0].ID
+		prevID := items[0].ID
+		cursor.Prev = &prevID
 	}
 	return ListSubscriptionsResponse{Items: items, Pagination: cursor, Total: total}, nil
 }
@@ -218,7 +220,7 @@ func (s *Service) CreateSubscription(ctx context.Context, req CreateSubscription
 		return CreateSubscriptionResponse{}, huma.Error500InternalServerError("failed to generate device subscription id", err)
 	}
 	row := model.DeviceSourceSubscriptions{
-		ID:        &id,
+		ID:        id,
 		DeviceID:  deviceID,
 		SourceID:  sourceID,
 		IsEnabled: dbtypes.BoolInt(req.IsEnabled),

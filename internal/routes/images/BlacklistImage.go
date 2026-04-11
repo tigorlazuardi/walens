@@ -12,12 +12,12 @@ import (
 // BlacklistImageOperation returns the Huma operation metadata for BlacklistImage.
 func BlacklistImageOperation(basePath string) huma.Operation {
 	return huma.Operation{
-		OperationID: "post-images-blacklist-image",
+		OperationID: "BlacklistImage",
 		Method:      "POST",
 		Path:        path.Join(basePath, "/api/v1/images/BlacklistImage"),
 		Summary:     "Blacklist an image",
 		Description: "Adds an image to the blacklist, preventing it from being downloaded again.",
-		Tags:        []string{"images"},
+		Tags:        []string{"Images"},
 	}
 }
 

@@ -12,12 +12,12 @@ import (
 // DeleteImageOperation returns the Huma operation metadata for DeleteImage.
 func DeleteImageOperation(basePath string) huma.Operation {
 	return huma.Operation{
-		OperationID: "post-images-delete-image",
+		OperationID: "DeleteImage",
 		Method:      "POST",
 		Path:        path.Join(basePath, "/api/v1/images/DeleteImage"),
 		Summary:     "Delete an image",
 		Description: "Deletes an image and its associated files and database records.",
-		Tags:        []string{"images"},
+		Tags:        []string{"Images"},
 	}
 }
 

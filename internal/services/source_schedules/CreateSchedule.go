@@ -38,7 +38,7 @@ func (s *Service) CreateSchedule(ctx context.Context, req CreateScheduleRequest)
 		return CreateScheduleResponse{}, huma.Error500InternalServerError("failed to generate schedule id", err)
 	}
 	row := model.SourceSchedules{
-		ID:        &id,
+		ID:        id,
 		SourceID:  req.SourceID,
 		CronExpr:  req.CronExpr,
 		IsEnabled: dbtypes.BoolInt(req.IsEnabled),

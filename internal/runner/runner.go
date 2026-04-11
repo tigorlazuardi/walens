@@ -285,7 +285,7 @@ func (r *Runner) processSourceSyncJob(ctx context.Context, job *model.Jobs) erro
 
 	// Create materialize request
 	matReq := MaterializeRequest{
-		JobID:        *job.ID,
+		JobID:        job.ID,
 		SourceID:     sourceID,
 		SourceType:   sourceType,
 		SourceParams: sourceParams,

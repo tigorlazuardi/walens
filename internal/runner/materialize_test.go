@@ -353,7 +353,7 @@ func TestRule1_AssignedAndFileExists_Skip(t *testing.T) {
 		SourceID:    sourceID,
 		SourceType:  "mock",
 		LookupCount: 10,
-		Devices:     []model.Devices{{ID: &deviceID, Slug: "test-device"}},
+		Devices:     []model.Devices{{ID: deviceID, Slug: "test-device"}},
 	}
 
 	result, err := mat.MaterializeImage(ctx, req, src)
@@ -424,7 +424,7 @@ func TestRule3_AssignedToAnotherDevice_HardLinkOrCopy(t *testing.T) {
 		SourceID:    sourceID,
 		SourceType:  "mock",
 		LookupCount: 10,
-		Devices:     []model.Devices{{ID: &deviceBID, Slug: "device-b"}},
+		Devices:     []model.Devices{{ID: deviceBID, Slug: "device-b"}},
 	}
 
 	result, err := mat.MaterializeImage(ctx, req, src)
@@ -480,7 +480,7 @@ func TestBlacklist_SkipsBlacklistedImage(t *testing.T) {
 		SourceID:    sourceID,
 		SourceType:  "mock",
 		LookupCount: 10,
-		Devices:     []model.Devices{{ID: &deviceID, Slug: "test-device"}},
+		Devices:     []model.Devices{{ID: deviceID, Slug: "test-device"}},
 	}
 
 	result, err := mat.MaterializeImage(ctx, req, src)
@@ -593,7 +593,7 @@ func TestRule4_AssignedElsewhereSourceMissing_DownloadForCurrentDevice(t *testin
 		SourceID:    sourceID,
 		SourceType:  "mock",
 		LookupCount: 10,
-		Devices:     []model.Devices{{ID: &deviceBID, Slug: "device-b"}},
+		Devices:     []model.Devices{{ID: deviceBID, Slug: "device-b"}},
 	}
 
 	result, err := mat.MaterializeImage(ctx, req, src)
@@ -656,7 +656,7 @@ func TestMultipleImages_MultipleDevices(t *testing.T) {
 		SourceID:    sourceID,
 		SourceType:  "mock",
 		LookupCount: 10,
-		Devices:     []model.Devices{{ID: &deviceAID, Slug: "device-a"}, {ID: &deviceBID, Slug: "device-b"}},
+		Devices:     []model.Devices{{ID: deviceAID, Slug: "device-a"}, {ID: deviceBID, Slug: "device-b"}},
 	}
 
 	result, err := mat.MaterializeImage(ctx, req, src)
@@ -716,7 +716,7 @@ func TestMaterializeResult_Counters(t *testing.T) {
 		SourceID:    sourceID,
 		SourceType:  "mock",
 		LookupCount: 10,
-		Devices:     []model.Devices{{ID: &deviceID, Slug: "test-device"}},
+		Devices:     []model.Devices{{ID: deviceID, Slug: "test-device"}},
 	}
 
 	result, err := mat.MaterializeImage(ctx, req, src)
@@ -793,7 +793,7 @@ func TestRule2_RedownloadWithExistingAssignment_NoDuplicateLocation(t *testing.T
 		SourceID:    sourceID,
 		SourceType:  "mock",
 		LookupCount: 10,
-		Devices:     []model.Devices{{ID: &deviceID, Slug: "test-device"}},
+		Devices:     []model.Devices{{ID: deviceID, Slug: "test-device"}},
 	}
 
 	// This should NOT fail even though there's already a location record.
@@ -871,7 +871,7 @@ func TestCopyFallback_StorageKindIsCopy(t *testing.T) {
 		SourceID:    sourceID,
 		SourceType:  "mock",
 		LookupCount: 10,
-		Devices:     []model.Devices{{ID: &deviceBID, Slug: "device-b"}},
+		Devices:     []model.Devices{{ID: deviceBID, Slug: "device-b"}},
 	}
 
 	result, err := mat.MaterializeImage(ctx, req, src)
@@ -945,7 +945,7 @@ func TestStoredCount_OnlyNewImages(t *testing.T) {
 		SourceID:    sourceID,
 		SourceType:  "mock",
 		LookupCount: 10,
-		Devices:     []model.Devices{{ID: &deviceAID, Slug: "device-a"}, {ID: &deviceBID, Slug: "device-b"}},
+		Devices:     []model.Devices{{ID: deviceAID, Slug: "device-a"}, {ID: deviceBID, Slug: "device-b"}},
 	}
 
 	result, err := mat.MaterializeImage(ctx, req, src)
@@ -1014,7 +1014,7 @@ func TestTagsPersistence_TagsAreStored(t *testing.T) {
 		SourceID:    sourceID,
 		SourceType:  "mock",
 		LookupCount: 10,
-		Devices:     []model.Devices{{ID: &deviceID, Slug: "test-device"}},
+		Devices:     []model.Devices{{ID: deviceID, Slug: "test-device"}},
 	}
 
 	result, err := mat.MaterializeImage(ctx, req, src)
@@ -1093,7 +1093,7 @@ func TestTagsPersistence_DedupeCaseInsensitive(t *testing.T) {
 		SourceID:    sourceID,
 		SourceType:  "mock",
 		LookupCount: 10,
-		Devices:     []model.Devices{{ID: &deviceID, Slug: "test-device"}},
+		Devices:     []model.Devices{{ID: deviceID, Slug: "test-device"}},
 	}
 
 	_, err := mat.MaterializeImage(ctx, req, src)
@@ -1200,7 +1200,7 @@ func TestThumbnail_CreatesThumbnailRow(t *testing.T) {
 		SourceID:    sourceID,
 		SourceType:  "mock",
 		LookupCount: 10,
-		Devices:     []model.Devices{{ID: &deviceID, Slug: "test-device"}},
+		Devices:     []model.Devices{{ID: deviceID, Slug: "test-device"}},
 	}
 
 	result, err := mat.MaterializeImage(ctx, req, src)
@@ -1281,7 +1281,7 @@ func TestThumbnail_NoDuplicateRows(t *testing.T) {
 		SourceID:    sourceID,
 		SourceType:  "mock",
 		LookupCount: 10,
-		Devices:     []model.Devices{{ID: &deviceID, Slug: "test-device"}},
+		Devices:     []model.Devices{{ID: deviceID, Slug: "test-device"}},
 	}
 
 	// Process the image once
@@ -1357,7 +1357,7 @@ func TestThumbnail_UsesCanonicalFile(t *testing.T) {
 		SourceID:    sourceID,
 		SourceType:  "mock",
 		LookupCount: 10,
-		Devices:     []model.Devices{{ID: &deviceAID, Slug: "device-a"}, {ID: &deviceBID, Slug: "device-b"}},
+		Devices:     []model.Devices{{ID: deviceAID, Slug: "device-a"}, {ID: deviceBID, Slug: "device-b"}},
 	}
 
 	_, err := mat.MaterializeImage(ctx, req, src)

@@ -12,12 +12,12 @@ import (
 )
 
 type ImageThumbnails struct {
-	ID            *dbtypes.UUID         `sql:"primary_key" json:"id" doc:"Unique thumbnail identifier (UUIDv7)"`
-	ImageID       dbtypes.UUID          `json:"image_id" doc:"Reference to source image"`
-	Path          string                `json:"path" doc:"Absolute filesystem path to the thumbnail"`
-	Width         int64                 `json:"width" doc:"Thumbnail width in pixels"`
-	Height        int64                 `json:"height" doc:"Thumbnail height in pixels"`
-	FileSizeBytes *int64                `json:"file_size_bytes" doc:"Thumbnail file size in bytes"`
-	CreatedAt     dbtypes.UnixMilliTime `json:"created_at" doc:"Thumbnail creation timestamp"`
-	UpdatedAt     dbtypes.UnixMilliTime `json:"updated_at" doc:"Last modification timestamp"`
+	ID            dbtypes.UUID          `sql:"primary_key" doc:"Unique thumbnail identifier (UUIDv7)" required:"true" json:"id",omitzero`
+	ImageID       dbtypes.UUID          `doc:"Reference to source image" required:"true" json:"image_id",omitzero`
+	Path          string                `doc:"Absolute filesystem path to the thumbnail" required:"true" json:"path",omitzero`
+	Width         int64                 `doc:"Thumbnail width in pixels" required:"true" json:"width",omitzero`
+	Height        int64                 `doc:"Thumbnail height in pixels" required:"true" json:"height",omitzero`
+	FileSizeBytes *int64                `doc:"Thumbnail file size in bytes" json:"file_size_bytes"`
+	CreatedAt     dbtypes.UnixMilliTime `doc:"Thumbnail creation timestamp" required:"true" json:"created_at",omitzero`
+	UpdatedAt     dbtypes.UnixMilliTime `doc:"Last modification timestamp" required:"true" json:"updated_at",omitzero`
 }

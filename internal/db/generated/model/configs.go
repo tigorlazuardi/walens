@@ -12,7 +12,7 @@ import (
 )
 
 type Configs struct {
-	ID        *int64                `sql:"primary_key" json:"id" doc:"Primary key, always 1 for single-row config"`
-	Value     dbtypes.RawJSON       `json:"value" doc:"Full serialized application config as JSON"`
-	UpdatedAt dbtypes.UnixMilliTime `json:"updated_at" doc:"Last modification timestamp"`
+	ID        *int64                `sql:"primary_key" doc:"Primary key, always 1 for single-row config" json:"id"`
+	Value     dbtypes.RawJSON       `doc:"Full serialized application config as JSON" required:"true" json:"value",omitzero`
+	UpdatedAt dbtypes.UnixMilliTime `doc:"Last modification timestamp" required:"true" json:"updated_at",omitzero`
 }

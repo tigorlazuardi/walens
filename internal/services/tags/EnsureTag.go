@@ -62,7 +62,7 @@ func (s *Service) createTag(ctx context.Context, name, normalizedName string) (*
 
 	// Use the original name as provided (first non-blank), but normalized for storage
 	row := model.Tags{
-		ID:             &id,
+		ID:             id,
 		Name:           name,
 		NormalizedName: normalizedName,
 		CreatedAt:      now,

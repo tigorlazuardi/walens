@@ -86,7 +86,7 @@ func (s *Service) ensureImageBlacklist(ctx context.Context, sourceID dbtypes.UUI
 	id := dbtypes.MustNewUUIDV7()
 
 	row := model.ImageBlacklists{
-		ID:               &id,
+		ID:               id,
 		SourceID:         sourceID,
 		UniqueIdentifier: uniqueIdentifier,
 		Reason:           reason,

@@ -12,10 +12,10 @@ import (
 )
 
 type DeviceSourceSubscriptions struct {
-	ID        *dbtypes.UUID         `sql:"primary_key" json:"id" doc:"Unique subscription identifier (UUIDv7)"`
-	DeviceID  dbtypes.UUID          `json:"device_id" doc:"Reference to subscribed device"`
-	SourceID  dbtypes.UUID          `json:"source_id" doc:"Reference to subscribed source"`
-	IsEnabled dbtypes.BoolInt       `json:"is_enabled" doc:"Whether this subscription is active"`
-	CreatedAt dbtypes.UnixMilliTime `json:"created_at" doc:"Subscription creation timestamp"`
-	UpdatedAt dbtypes.UnixMilliTime `json:"updated_at" doc:"Last modification timestamp"`
+	ID        dbtypes.UUID          `sql:"primary_key" doc:"Unique subscription identifier (UUIDv7)" required:"true" json:"id",omitzero`
+	DeviceID  dbtypes.UUID          `doc:"Reference to subscribed device" required:"true" json:"device_id",omitzero`
+	SourceID  dbtypes.UUID          `doc:"Reference to subscribed source" required:"true" json:"source_id",omitzero`
+	IsEnabled dbtypes.BoolInt       `doc:"Whether this subscription is active" required:"true" json:"is_enabled",omitzero`
+	CreatedAt dbtypes.UnixMilliTime `doc:"Subscription creation timestamp" required:"true" json:"created_at",omitzero`
+	UpdatedAt dbtypes.UnixMilliTime `doc:"Last modification timestamp" required:"true" json:"updated_at",omitzero`
 }

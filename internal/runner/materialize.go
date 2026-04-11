@@ -151,7 +151,7 @@ func (m *Materializer) MaterializeImage(ctx context.Context, req MaterializeRequ
 		// Sync tags for this image - happens before materialization so metadata is persisted
 		// even if a device later gets skipped. Failures are logged but don't stop processing.
 		if m.tagsSvc != nil && len(item.Tags) > 0 {
-			if err := m.tagsSvc.SyncImageTags(ctx, *img.ID, item.Tags, m.logger); err != nil {
+			if err := m.tagsSvc.SyncImageTags(ctx, img.ID, item.Tags, m.logger); err != nil {
 				m.logger.Warn("failed to sync image tags", "error", err, "unique_id", uniqueID)
 			}
 		}
@@ -164,7 +164,7 @@ func (m *Materializer) MaterializeImage(ctx context.Context, req MaterializeRequ
 		thumbnailSourcePath := ""
 
 		// Get existing locations for this image
-		existingLocations, err := m.imageSvc.GetImageLocations(ctx, *img.ID)
+		existingLocations, err := m.imageSvc.GetImageLocations(ctx, img.ID)
 		if err != nil && !errors.Is(err, images.ErrLocationNotFound) {
 			m.logger.Warn("failed to get image locations", "error", err)
 			continue
@@ -191,7 +191,7 @@ func (m *Materializer) MaterializeImage(ctx context.Context, req MaterializeRequ
 			deviceIDStr := device.ID.UUID.String()
 
 			// Check if already assigned to this device
-			_, err := m.imageSvc.GetImageAssignment(ctx, *img.ID, *device.ID)
+			_, err := m.imageSvc.GetImageAssignment(ctx, img.ID, device.ID)
 			hasAssignment := err == nil
 			if err != nil && !errors.Is(err, images.ErrAssignmentNotFound) {
 				m.logger.Warn("failed to check assignment", "error", err)
@@ -230,8 +230,8 @@ func (m *Materializer) MaterializeImage(ctx context.Context, req MaterializeRequ
 
 				// Ensure location record exists (update if already exists)
 				_, err = m.imageSvc.EnsureImageLocation(ctx, images.EnsureImageLocationRequest{
-					ImageID:     *img.ID,
-					DeviceID:    *device.ID,
+					ImageID:     img.ID,
+					DeviceID:    device.ID,
 					Path:        path,
 					StorageKind: StorageKindCanonical,
 					IsPrimary:   true,
@@ -274,15 +274,15 @@ func (m *Materializer) MaterializeImage(ctx context.Context, req MaterializeRequ
 				}
 
 				// Ensure assignment exists (idempotent - won't fail if already exists)
-				_, err = m.imageSvc.EnsureImageAssignment(ctx, *img.ID, *device.ID)
+				_, err = m.imageSvc.EnsureImageAssignment(ctx, img.ID, device.ID)
 				if err != nil {
 					m.logger.Warn("failed to ensure assignment", "error", err)
 				}
 
 				// Ensure location exists (idempotent - update if already exists)
 				_, err = m.imageSvc.EnsureImageLocation(ctx, images.EnsureImageLocationRequest{
-					ImageID:     *img.ID,
-					DeviceID:    *device.ID,
+					ImageID:     img.ID,
+					DeviceID:    device.ID,
 					Path:        targetPath,
 					StorageKind: storageKind,
 					IsPrimary:   true,
@@ -305,15 +305,15 @@ func (m *Materializer) MaterializeImage(ctx context.Context, req MaterializeRequ
 			result.DownloadedCount++
 
 			// Ensure assignment exists (idempotent - won't fail if already exists)
-			_, err = m.imageSvc.EnsureImageAssignment(ctx, *img.ID, *device.ID)
+			_, err = m.imageSvc.EnsureImageAssignment(ctx, img.ID, device.ID)
 			if err != nil {
 				m.logger.Warn("failed to ensure assignment", "error", err)
 			}
 
 			// Ensure location exists (idempotent - update if already exists)
 			_, err = m.imageSvc.EnsureImageLocation(ctx, images.EnsureImageLocationRequest{
-				ImageID:     *img.ID,
-				DeviceID:    *device.ID,
+				ImageID:     img.ID,
+				DeviceID:    device.ID,
 				Path:        path,
 				StorageKind: StorageKindCanonical,
 				IsPrimary:   true,
@@ -338,7 +338,7 @@ func (m *Materializer) MaterializeImage(ctx context.Context, req MaterializeRequ
 		// Ensure thumbnail exists after processing all devices
 		// Only generate if we have a source path and haven't generated yet
 		if thumbnailSourcePath != "" && !thumbnailGenerated {
-			if err := m.ensureThumbnail(ctx, *img.ID, thumbnailSourcePath); err != nil {
+			if err := m.ensureThumbnail(ctx, img.ID, thumbnailSourcePath); err != nil {
 				m.logger.Warn("failed to ensure thumbnail", "error", err, "image_id", img.ID.UUID.String())
 				// Continue processing - thumbnail failure should not fail the job
 			} else {

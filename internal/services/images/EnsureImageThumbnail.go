@@ -37,7 +37,7 @@ func (s *Service) EnsureImageThumbnail(ctx context.Context, req EnsureImageThumb
 		// No existing thumbnail - create new one
 		id := dbtypes.MustNewUUIDV7()
 		row := model.ImageThumbnails{
-			ID:            &id,
+			ID:            id,
 			ImageID:       req.ImageID,
 			Path:          req.Path,
 			Width:         req.Width,

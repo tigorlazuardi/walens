@@ -12,10 +12,10 @@ import (
 )
 
 type ImageBlacklists struct {
-	ID               *dbtypes.UUID         `sql:"primary_key" json:"id" doc:"Unique blacklist entry identifier (UUIDv7)"`
-	SourceID         dbtypes.UUID          `json:"source_id" doc:"Reference to source this blacklist applies to"`
-	UniqueIdentifier string                `json:"unique_identifier" doc:"Source-specific image identifier to block"`
-	Reason           *string               `json:"reason" doc:"Human-readable reason for blacklisting"`
-	CreatedAt        dbtypes.UnixMilliTime `json:"created_at" doc:"Blacklist entry creation timestamp"`
-	UpdatedAt        dbtypes.UnixMilliTime `json:"updated_at" doc:"Last modification timestamp"`
+	ID               dbtypes.UUID          `sql:"primary_key" doc:"Unique blacklist entry identifier (UUIDv7)" required:"true" json:"id",omitzero`
+	SourceID         dbtypes.UUID          `doc:"Reference to source this blacklist applies to" required:"true" json:"source_id",omitzero`
+	UniqueIdentifier string                `doc:"Source-specific image identifier to block" required:"true" json:"unique_identifier",omitzero`
+	Reason           *string               `doc:"Human-readable reason for blacklisting" json:"reason"`
+	CreatedAt        dbtypes.UnixMilliTime `doc:"Blacklist entry creation timestamp" required:"true" json:"created_at",omitzero`
+	UpdatedAt        dbtypes.UnixMilliTime `doc:"Last modification timestamp" required:"true" json:"updated_at",omitzero`
 }

@@ -15,7 +15,7 @@ func (s *Service) CreateImageAssignment(ctx context.Context, imageID, deviceID d
 	id := dbtypes.MustNewUUIDV7()
 
 	row := model.ImageAssignments{
-		ID:        &id,
+		ID:        id,
 		ImageID:   imageID,
 		DeviceID:  deviceID,
 		CreatedAt: now,

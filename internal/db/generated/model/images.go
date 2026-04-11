@@ -12,25 +12,25 @@ import (
 )
 
 type Images struct {
-	ID                   *dbtypes.UUID         `sql:"primary_key" json:"id" doc:"Unique image identifier (UUIDv7)"`
-	SourceID             *dbtypes.UUID         `json:"source_id" doc:"Reference to source this image came from"`
-	UniqueIdentifier     string                `json:"unique_identifier" doc:"Source-provided unique identifier for dedupe"`
-	SourceType           string                `json:"source_type" doc:"Source implementation type name"`
-	OriginalFilename     *string               `json:"original_filename" doc:"Original filename from source"`
-	PreviewURL           *string               `json:"preview_url" doc:"Low-resolution preview URL"`
-	OriginURL            *string               `json:"origin_url" doc:"Original source URL for the image"`
-	SourceItemIdentifier *string               `json:"source_item_identifier" doc:"External source item/post identifier"`
-	OriginalIdentifier   *string               `json:"original_identifier" doc:"External original/source identifier"`
-	Uploader             *string               `json:"uploader" doc:"Uploader/artist name from source"`
-	Artist               *string               `json:"artist" doc:"Artist/creator name from source"`
-	MimeType             *string               `json:"mime_type" doc:"Image MIME type"`
-	FileSizeBytes        *int64                `json:"file_size_bytes" doc:"File size in bytes"`
-	Width                *int64                `json:"width" doc:"Image width in pixels"`
-	Height               *int64                `json:"height" doc:"Image height in pixels"`
-	AspectRatio          *float64              `json:"aspect_ratio" doc:"Image aspect ratio (width/height)"`
-	IsAdult              dbtypes.BoolInt       `json:"is_adult" doc:"Whether the image contains adult content"`
-	IsFavorite           dbtypes.BoolInt       `json:"is_favorite" doc:"Whether the user marked this as favorite"`
-	JSONMeta             dbtypes.RawJSON       `json:"json_meta" doc:"Additional image metadata as JSON"`
-	CreatedAt            dbtypes.UnixMilliTime `json:"created_at" doc:"Image creation timestamp"`
-	UpdatedAt            dbtypes.UnixMilliTime `json:"updated_at" doc:"Last modification timestamp"`
+	ID                   dbtypes.UUID          `sql:"primary_key" doc:"Unique image identifier (UUIDv7)" required:"true" json:"id",omitzero`
+	SourceID             *dbtypes.UUID         `doc:"Reference to source this image came from" json:"source_id"`
+	UniqueIdentifier     string                `doc:"Source-provided unique identifier for dedupe" required:"true" json:"unique_identifier",omitzero`
+	SourceType           string                `doc:"Source implementation type name" required:"true" json:"source_type",omitzero`
+	OriginalFilename     *string               `doc:"Original filename from source" json:"original_filename"`
+	PreviewURL           *string               `doc:"Low-resolution preview URL" json:"preview_url"`
+	OriginURL            *string               `doc:"Original source URL for the image" json:"origin_url"`
+	SourceItemIdentifier *string               `doc:"External source item/post identifier" json:"source_item_identifier"`
+	OriginalIdentifier   *string               `doc:"External original/source identifier" json:"original_identifier"`
+	Uploader             *string               `doc:"Uploader/artist name from source" json:"uploader"`
+	Artist               *string               `doc:"Artist/creator name from source" json:"artist"`
+	MimeType             *string               `doc:"Image MIME type" json:"mime_type"`
+	FileSizeBytes        *int64                `doc:"File size in bytes" json:"file_size_bytes"`
+	Width                *int64                `doc:"Image width in pixels" json:"width"`
+	Height               *int64                `doc:"Image height in pixels" json:"height"`
+	AspectRatio          *float64              `doc:"Image aspect ratio (width/height)" json:"aspect_ratio"`
+	IsAdult              dbtypes.BoolInt       `doc:"Whether the image contains adult content" required:"true" json:"is_adult",omitzero`
+	IsFavorite           dbtypes.BoolInt       `doc:"Whether the user marked this as favorite" required:"true" json:"is_favorite",omitzero`
+	JSONMeta             dbtypes.RawJSON       `doc:"Additional image metadata as JSON" required:"true" json:"json_meta",omitzero`
+	CreatedAt            dbtypes.UnixMilliTime `doc:"Image creation timestamp" required:"true" json:"created_at",omitzero`
+	UpdatedAt            dbtypes.UnixMilliTime `doc:"Last modification timestamp" required:"true" json:"updated_at",omitzero`
 }

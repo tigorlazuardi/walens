@@ -40,7 +40,7 @@ func (s *Service) SyncImageTags(ctx context.Context, imageID dbtypes.UUID, tagNa
 		}
 
 		// Ensure image-tag association exists
-		_, err = s.EnsureImageTag(ctx, imageID, *tag.ID)
+		_, err = s.EnsureImageTag(ctx, imageID, tag.ID)
 		if err != nil {
 			logger.Warn("failed to ensure image tag", "image_id", imageID, "tag_id", tag.ID, "error", err)
 			continue
@@ -102,7 +102,7 @@ func (s *Service) SyncImageTagsWithError(ctx context.Context, imageID dbtypes.UU
 		}
 
 		// Ensure image-tag association exists
-		_, err = s.EnsureImageTag(ctx, imageID, *tag.ID)
+		_, err = s.EnsureImageTag(ctx, imageID, tag.ID)
 		if err != nil {
 			return fmt.Errorf("ensure image tag for tag %q: %w", tagName, err)
 		}

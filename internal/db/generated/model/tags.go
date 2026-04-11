@@ -12,9 +12,9 @@ import (
 )
 
 type Tags struct {
-	ID             *dbtypes.UUID         `sql:"primary_key" json:"id" doc:"Unique tag identifier (UUIDv7)"`
-	Name           string                `json:"name" doc:"Original tag name"`
-	NormalizedName string                `json:"normalized_name" doc:"Lowercase trimmed canonical tag name for dedupe"`
-	CreatedAt      dbtypes.UnixMilliTime `json:"created_at" doc:"Tag creation timestamp"`
-	UpdatedAt      dbtypes.UnixMilliTime `json:"updated_at" doc:"Last modification timestamp"`
+	ID             dbtypes.UUID          `sql:"primary_key" doc:"Unique tag identifier (UUIDv7)" required:"true" json:"id",omitzero`
+	Name           string                `doc:"Original tag name" required:"true" json:"name",omitzero`
+	NormalizedName string                `doc:"Lowercase trimmed canonical tag name for dedupe" required:"true" json:"normalized_name",omitzero`
+	CreatedAt      dbtypes.UnixMilliTime `doc:"Tag creation timestamp" required:"true" json:"created_at",omitzero`
+	UpdatedAt      dbtypes.UnixMilliTime `doc:"Last modification timestamp" required:"true" json:"updated_at",omitzero`
 }

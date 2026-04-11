@@ -25,7 +25,7 @@ func (s *Service) CreateImageLocation(ctx context.Context, req CreateImageLocati
 	id := dbtypes.MustNewUUIDV7()
 
 	row := model.ImageLocations{
-		ID:          &id,
+		ID:          id,
 		ImageID:     req.ImageID,
 		DeviceID:    req.DeviceID,
 		Path:        req.Path,

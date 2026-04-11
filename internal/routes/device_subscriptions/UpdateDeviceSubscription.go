@@ -11,12 +11,12 @@ import (
 // UpdateDeviceSubscriptionOperation returns the Huma operation metadata for UpdateDeviceSubscription.
 func UpdateDeviceSubscriptionOperation(basePath string) huma.Operation {
 	return huma.Operation{
-		OperationID: "post-device_subscriptions-update-device_subscription",
+		OperationID: "UpdateDeviceSubscription",
 		Method:      "POST",
 		Path:        path.Join(basePath, "/api/v1/device_subscriptions/UpdateDeviceSubscription"),
 		Summary:     "Update an existing device subscription",
 		Description: "Updates an existing device source subscription with full-object update semantics.",
-		Tags:        []string{"device_subscriptions"},
+		Tags:        []string{"Device Subscriptions"},
 	}
 }
 

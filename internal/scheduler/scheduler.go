@@ -299,11 +299,6 @@ func (s *Scheduler) executeScheduledJob(ss SourceSchedule) {
 		return
 	}
 
-	if job.ID == nil {
-		s.logger.Error("created job has no ID")
-		return
-	}
-
 	jobID := job.ID.UUID.String()
 	s.logger.Info("scheduled job created", "job_id", jobID)
 

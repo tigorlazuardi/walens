@@ -1,105 +1,106 @@
-<script>
-  // Read runtime config injected by backend
-  const config = window.__WALENS__ || {
-    basePath: '/',
-    apiBase: '/api',
-  };
+<script lang="ts">
+  import Layout from './components/Layout.svelte';
+  import { getRuntimeConfig } from './lib/runtime';
+  import type { Snippet } from 'svelte';
 
-  // Export config for use in child components
-  export { config };
+  const config = getRuntimeConfig();
 
-  // Simple client-side router honoring basePath
-  function getRoutePath() {
-    const fullPath = window.location.pathname;
-    // Strip basePath from the beginning if present
-    if (config.basePath !== '/' && fullPath.startsWith(config.basePath)) {
-      return fullPath.slice(config.basePath.length) || '/';
-    }
-    return fullPath;
-  }
-
-  let currentRoute = $state(getRoutePath());
-
-  // Navigation function
-  function navigate(path) {
-    const fullPath = config.basePath === '/' ? path : config.basePath + path;
-    window.history.pushState({}, '', fullPath);
-    currentRoute = getRoutePath();
-  }
-
-  // Handle popstate (browser back/forward)
-  if (typeof window !== 'undefined') {
-    window.addEventListener('popstate', () => {
-      currentRoute = getRoutePath();
-    });
-  }
-
-  // Lazy-loaded route components
-  const routes = {
+  // Route definitions - using lazy imports for code splitting
+  const routeLoaders: Record<string, () => Promise<{ default: any }>> = {
     '/': () => import('./routes/Home.svelte'),
-    '/sources': () => import('./routes/Sources.svelte'),
+    '/login': () => import('./routes/Login.svelte'),
     '/devices': () => import('./routes/Devices.svelte'),
+    '/sources': () => import('./routes/Sources.svelte'),
+    '/schedules': () => import('./routes/Schedules.svelte'),
+    '/subscriptions': () => import('./routes/Subscriptions.svelte'),
     '/images': () => import('./routes/Images.svelte'),
+    '/jobs': () => import('./routes/Jobs.svelte'),
+    '/status': () => import('./routes/Status.svelte'),
     '/settings': () => import('./routes/Settings.svelte'),
   };
 
-  // Resolve route with dynamic import
-  let RouteComponent = $state(null);
-  let loading = $state(false);
+  // Current path state
+  let currentPath = $state(window.location.pathname.replace(config.basePath, '') || '/');
 
-  async function loadRoute(path) {
-    loading = true;
-    try {
-      // Find matching route or fallback to /
-      const handler = routes[path] || routes['/'];
-      const module = await handler();
-      RouteComponent = module.default;
-    } catch (e) {
-      console.error('Failed to load route:', e);
+  // Route component
+  let RouteComponent: any = $state(null);
+  let loading = $state(true);
+
+  // Navigate function
+  function navigate(path: string) {
+    const fullPath = config.basePath + path;
+    window.history.pushState({}, '', fullPath);
+    currentPath = path;
+    loadRoute(path);
+  }
+
+  // Load route
+  async function loadRoute(path: string) {
+    const loader = routeLoaders[path];
+    if (loader) {
+      loading = true;
+      try {
+        const module = await loader();
+        RouteComponent = module.default;
+      } catch (e) {
+        console.error('Failed to load route:', e);
+        RouteComponent = null;
+      }
+      loading = false;
+    } else {
       RouteComponent = null;
-    } finally {
       loading = false;
     }
   }
 
-  // React to route changes
+  // Handle popstate (back/forward buttons)
   $effect(() => {
-    loadRoute(currentRoute);
+    const handlePop = () => {
+      currentPath = window.location.pathname.replace(config.basePath, '') || '/';
+      loadRoute(currentPath);
+    };
+    window.addEventListener('popstate', handlePop);
+    return () => window.removeEventListener('popstate', handlePop);
   });
 
-  // Export navigation for use in components
-  export { navigate };
+  // Initial route load
+  $effect(() => {
+    loadRoute(currentPath);
+  });
+
+  // Content snippet that renders the current route
+  let content: Snippet;
 </script>
 
-<div class="app">
-  <nav>
-    <button onclick={() => navigate('/')}>Home</button>
-    <button onclick={() => navigate('/sources')}>Sources</button>
-    <button onclick={() => navigate('/devices')}>Devices</button>
-    <button onclick={() => navigate('/images')}>Images</button>
-    <button onclick={() => navigate('/settings')}>Settings</button>
-  </nav>
-
-  <main>
+<Layout {navigate} {currentPath}>
+  {#snippet children()}
     {#if loading}
-      <p>Loading...</p>
+      <div class="loading">Loading...</div>
     {:else if RouteComponent}
       <RouteComponent />
     {:else}
-      <p>Route not found</p>
+      <div class="not-found">
+        <h2>404</h2>
+        <p>Page not found</p>
+      </div>
     {/if}
-  </main>
-</div>
+  {/snippet}
+</Layout>
 
 <style>
-  .app {
-    font-family: sans-serif;
-    padding: 1rem;
+  .loading, .not-found {
+    padding: 2rem;
+    text-align: center;
+    color: #666;
   }
-  nav {
-    margin-bottom: 1rem;
+
+  .not-found h2 {
+    margin: 0;
+    font-size: 3rem;
+    color: #ccc;
   }
-  nav button {
-    margin-right: 0.5rem;
+
+  .not-found p {
+    margin: 0.5rem 0 0;
   }
 </style>

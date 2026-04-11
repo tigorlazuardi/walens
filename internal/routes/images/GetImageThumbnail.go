@@ -14,12 +14,12 @@ import (
 // GetImageThumbnailOperation returns the Huma operation metadata for GetImageThumbnail.
 func GetImageThumbnailOperation(basePath string) huma.Operation {
 	return huma.Operation{
-		OperationID: "post-images-get-image-thumbnail",
+		OperationID: "GetImageThumbnail",
 		Method:      "POST",
 		Path:        path.Join(basePath, "/api/v1/images/GetImageThumbnail"),
 		Summary:     "Get an image thumbnail",
 		Description: "Retrieves the thumbnail record for a given image.",
-		Tags:        []string{"images"},
+		Tags:        []string{"Images"},
 	}
 }
 

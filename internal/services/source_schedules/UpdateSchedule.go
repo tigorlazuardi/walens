@@ -43,7 +43,7 @@ func (s *Service) UpdateSchedule(ctx context.Context, req UpdateScheduleRequest)
 		return UpdateScheduleResponse{}, huma.Error400BadRequest("source not found", ErrSourceNotFound)
 	}
 	updated := model.SourceSchedules{
-		ID:        &req.ID,
+		ID:        req.ID,
 		SourceID:  req.SourceID,
 		CronExpr:  req.CronExpr,
 		IsEnabled: dbtypes.BoolInt(req.IsEnabled),

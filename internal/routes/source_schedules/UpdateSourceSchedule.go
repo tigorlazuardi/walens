@@ -11,12 +11,12 @@ import (
 // UpdateSourceScheduleOperation returns the Huma operation metadata for UpdateSourceSchedule.
 func UpdateSourceScheduleOperation(basePath string) huma.Operation {
 	return huma.Operation{
-		OperationID: "post-source_schedules-update-source_schedule",
+		OperationID: "UpdateSourceSchedule",
 		Method:      "POST",
 		Path:        path.Join(basePath, "/api/v1/source_schedules/UpdateSourceSchedule"),
 		Summary:     "Update an existing source schedule",
 		Description: "Updates an existing source schedule with full-object update semantics. All fields are required. Cron expressions are validated at the API boundary.",
-		Tags:        []string{"source_schedules"},
+		Tags:        []string{"Source Schedules"},
 	}
 }
 
