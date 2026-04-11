@@ -196,4 +196,8 @@ func RegisterImagesRoutes(api huma.API, basePath string, db *sql.DB) {
 	huma.Register(api, imagesroutes.DeleteImageOperation(basePath), func(ctx context.Context, input *imagesroutes.DeleteImageInput) (*imagesroutes.DeleteImageOutput, error) {
 		return imagesroutes.DeleteImage(ctx, input, imagesService)
 	})
+
+	huma.Register(api, imagesroutes.GetImageThumbnailOperation(basePath), func(ctx context.Context, input *imagesroutes.GetImageThumbnailInput) (*imagesroutes.GetImageThumbnailOutput, error) {
+		return imagesroutes.GetImageThumbnail(ctx, input, imagesService)
+	})
 }

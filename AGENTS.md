@@ -37,6 +37,18 @@ When working on a task that comes from Plane MCP:
 - Plane project ID: `dc766694-bfd6-47a7-8a63-4afcbb048f4d`
 - Unless the user says otherwise, requests like `implement WALENS-8` refer to this Plane project and its work items.
 
+#### Quick task lookup workflow
+
+When asked to work on a Plane task (e.g., `WALENS-30`):
+
+1. **If the identifier is full (e.g., `WALENS-30`):** use `plane-tigor_retrieve_work_item` with `project_id: "dc766694-bfd6-47a7-8a63-4afcbb048f4d"` and `work_item_id: "<uuid>"`. If you don't have the UUID yet, use `plane-tigor_retrieve_work_item_by_identifier` with `project_identifier: "WALENS"` and `issue_identifier: 30`.
+
+2. **If only a number is given (e.g., `task 30`):** treat it as a WALENS task by default. Use `plane-tigor_retrieve_work_item_by_identifier` with `project_identifier: "WALENS"` and `issue_identifier: <number>`.
+
+3. **If the identifier is unclear:** first list work items via `plane-tigor_list_work_items` with `project_id: "dc766694-bfd6-47a7-8a63-4afcbb048f4d"` to find the correct work item, then retrieve it.
+
+4. **After identifying the task:** mark it `in-progress` before starting implementation. Inspect details and subtasks to understand full scope.
+
 ## Product Scope
 
 Walens is a small self-hosted wallpaper collection app.
