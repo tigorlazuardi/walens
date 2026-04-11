@@ -665,6 +665,39 @@ func (a *App) addTagDescription(op *huma.Operation, tagDescriptions map[string]s
 	}
 }
 
+// OpenAPIYAML builds the OpenAPI specification and returns it as YAML bytes.
+// This does not start the HTTP server, scheduler, or any background workers.
+func (a *App) OpenAPIYAML() ([]byte, error) {
+	mux := http.NewServeMux()
+	basePath := a.config.Server.BasePath
+
+	if a.sourceRegistry == nil {
+		a.sourceRegistry = newSourceRegistry()
+	}
+
+	humaConfig := huma.DefaultConfig("Walens API", "0.0.1")
+	humaConfig.FieldsOptionalByDefault = true
+	humaConfig.OpenAPIPath = joinPath(basePath, "/openapi")
+	humaConfig.DocsPath = joinPath(basePath, "/docs")
+	humaConfig.SchemasPath = joinPath(basePath, "/schemas")
+	api := humago.New(mux, humaConfig)
+
+	authConfig := auth.Config{
+		Enabled:      a.config.Auth.Enabled,
+		Username:     a.config.Auth.Username,
+		Password:     a.config.Auth.Password,
+		BasePath:     a.config.Server.BasePath,
+		CookieSecure: a.config.Auth.CookieSecure,
+		CookieSecret: a.config.Auth.CookieSecret,
+	}
+
+	a.api = api
+	a.registerHumaRoutes(api, basePath, authConfig)
+	a.enhanceOpenAPISpec()
+
+	return api.OpenAPI().YAML()
+}
+
 func (a *App) startHTTPServer(ctx context.Context) error {
 	basePath := a.config.Server.BasePath
 	a.handler = a.buildHTTPHandler()

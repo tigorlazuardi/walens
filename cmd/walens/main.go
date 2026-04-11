@@ -17,12 +17,35 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Handle subcommands
+	if len(os.Args) >= 2 {
+		switch os.Args[1] {
+		case "openapi-yaml":
+			openapiYAML()
+			return
+		}
+	}
+
+	// Default: run the application
 	cfg := config.Load()
 
 	if err := run(cfg); err != nil {
 		slog.Error("application error", "error", err)
 		os.Exit(1)
 	}
+}
+
+func openapiYAML() {
+	cfg := config.Load()
+	application := app.New(cfg)
+
+	yamlBytes, err := application.OpenAPIYAML()
+	if err != nil {
+		slog.Error("failed to generate OpenAPI YAML", "error", err)
+		os.Exit(1)
+	}
+
+	os.Stdout.Write(yamlBytes)
 }
 
 func run(cfg *config.Config) error {
