@@ -301,7 +301,7 @@ export function useJob(id: string | undefined) {
 export function useRuntimeStatus() {
     return createQuery(() => ({
         queryKey: ["runtimeStatus"],
-        queryFn: () => api.request(apiRoutes.runtimeStatus.get, undefined as never),
+        queryFn: () => api.request(apiRoutes.runtimeStatus.get),
         refetchInterval: 5000,
     }));
 }

@@ -1,7 +1,7 @@
 /**
  * API client using openapi-fetch.
  *
- * All RPC endpoints use POST with JSON body (Huma convention).
+ * All RPC endpoints use POST, with JSON body when required (Huma convention).
  * Auth handling: on 401 response, redirects browser to /login with
  * the current path preserved as a redirect target. After successful
  * login, the user is sent back to the original path.
@@ -34,9 +34,13 @@ type PostSuccessResponse<P extends PostPaths> = paths[P] extends {
     ? R
     : void;
 
+type PostRequestArgs<P extends PostPaths> = PostRequestBody<P> extends never
+    ? []
+    : [body: PostRequestBody<P>];
+
 type PostCaller = <P extends PostPaths>(
     path: P,
-    init: { body: PostRequestBody<P> },
+    init?: { body?: PostRequestBody<P> },
 ) => Promise<{ response: Response; data?: unknown }>;
 
 const { basePath } = getRuntimeConfig();
@@ -88,7 +92,7 @@ export function popRedirectAfterLogin(): string {
 /** Handles 401 by redirecting browser to login page. */
 function handleAuthError() {
     const target = stripBasePath(window.location.pathname, basePath) || "/";
-    const loginUrl = `${buildAppPath('login')}${target !== "/" ? "?redirect=" + encodeURIComponent(target) : ""}`;
+    const loginUrl = `${buildAppPath("login")}${target !== "/" ? "?redirect=" + encodeURIComponent(target) : ""}`;
     window.location.href = loginUrl;
     throw new Error("Unauthorized – redirecting to login");
 }
@@ -102,9 +106,10 @@ function handleAuthError() {
  */
 export async function request<P extends PostPaths>(
     path: P,
-    body: PostRequestBody<P>,
+    ...args: PostRequestArgs<P>
 ): Promise<PostSuccessResponse<P>> {
-    const res = await post(path, { body });
+    const body = args[0];
+    const res = body === undefined ? await post(path) : await post(path, { body });
     if (res.response.status === 401) handleAuthError();
 
     // Surface server-level error details when openapi-fetch exposes them.
@@ -124,36 +129,12 @@ export async function request<P extends PostPaths>(
     return res.data as PostSuccessResponse<P>;
 }
 
-// ==================== Login / Logout ====================
+// ==================== Auth Helpers ====================
 
-/**
- * Bootstrap browser auth cookie by posting to /api/login.
- * Combines username and password into a Basic Auth Authorization header.
- * On success the server sets an HTTP-only cookie.
- */
 export async function login(username: string, password: string): Promise<void> {
-    const credentials = btoa(`${username}:${password}`);
-    const res = await fetch(apiRoutes.login, {
-        method: "POST",
-        headers: {
-            Authorization: `Basic ${credentials}`,
-        },
-        credentials: "include",
-    });
-    if (!res.ok) {
-        throw new Error(`Login failed: ${res.statusText}`);
-    }
+    await request(apiRoutes.login, { username, password });
 }
 
-/**
- * Clear the browser auth cookie by posting to /api/logout.
- */
 export async function logout(): Promise<void> {
-    const res = await fetch(apiRoutes.logout, {
-        method: "POST",
-        credentials: "include",
-    });
-    if (!res.ok) {
-        throw new Error(`Logout failed: ${res.statusText}`);
-    }
+    await request(apiRoutes.logout);
 }
