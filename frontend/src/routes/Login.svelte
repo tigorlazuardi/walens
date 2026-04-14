@@ -1,7 +1,9 @@
 <script lang="ts">
+  import { onMount } from 'svelte';
   import { getRuntimeConfig } from '../lib/runtime';
   import { joinBasePath } from '../lib/path';
-  import { login as apiLogin, popRedirectAfterLogin } from '../lib/api/client';
+  import { login, popRedirectAfterLogin, requestWithoutBody } from '../lib/api/client';
+  import { apiRoutes } from '../lib/api/routes';
   import { QueryClient } from '../lib/query-client';
   import { Button, Card, Input } from '../lib/components/ui';
 
@@ -9,6 +11,20 @@
 
   const urlParams = new URLSearchParams(window.location.search);
   const redirectTarget = urlParams.get('redirect') || popRedirectAfterLogin() || '/';
+
+  onMount(() => {
+    void (async () => {
+      try {
+        const status = await requestWithoutBody(apiRoutes.runtimeStatus.get, { redirectOn401: false });
+        if (status.auth_enabled === false) {
+          window.location.replace(joinBasePath(config.basePath));
+        }
+      } catch {
+        // Auth is enabled (401) or runtime status is temporarily unavailable.
+        // Stay on the login page.
+      }
+    })();
+  });
 
   let username = $state('');
   let password = $state('');
@@ -21,7 +37,7 @@
     loading = true;
 
     try {
-      await apiLogin(username, password);
+      await login(username, password);
       QueryClient.invalidateQueries({ queryKey: ['runtimeStatus'] });
       window.location.href = joinBasePath(config.basePath, redirectTarget);
     } catch (err) {

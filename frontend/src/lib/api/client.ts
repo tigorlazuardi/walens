@@ -34,10 +34,6 @@ type PostSuccessResponse<P extends PostPaths> = paths[P] extends {
     ? R
     : void;
 
-type PostRequestArgs<P extends PostPaths> = PostRequestBody<P> extends never
-    ? []
-    : [body: PostRequestBody<P>];
-
 type PostCaller = <P extends PostPaths>(
     path: P,
     init?: { body?: PostRequestBody<P> },
@@ -89,6 +85,10 @@ export function popRedirectAfterLogin(): string {
 
 // ==================== Internal 401 Handler ====================
 
+type RequestOptions = {
+    redirectOn401?: boolean;
+};
+
 /** Handles 401 by redirecting browser to login page. */
 function handleAuthError() {
     const target = stripBasePath(window.location.pathname, basePath) || "/";
@@ -104,13 +104,25 @@ function handleAuthError() {
  * common void/success patterns. Preserves schedule response unwrapping
  * behaviour in the individual functions that need it.
  */
+export function request<P extends PostPaths>(
+    path: P,
+    body: PostRequestBody<P>,
+    options?: RequestOptions,
+): Promise<PostSuccessResponse<P>>;
+export function request<P extends PostPaths>(
+    path: P,
+    options?: RequestOptions,
+): Promise<PostSuccessResponse<P>>;
 export async function request<P extends PostPaths>(
     path: P,
-    ...args: PostRequestArgs<P>
+    bodyOrOptions?: PostRequestBody<P> | RequestOptions,
+    options?: RequestOptions
 ): Promise<PostSuccessResponse<P>> {
-    const body = args[0];
+    const hasBody = options !== undefined || !(bodyOrOptions && "redirectOn401" in bodyOrOptions);
+    const body = hasBody ? (bodyOrOptions as PostRequestBody<P> | undefined) : undefined;
+    const requestOptions = (hasBody ? options : bodyOrOptions) as RequestOptions | undefined;
     const res = body === undefined ? await post(path) : await post(path, { body });
-    if (res.response.status === 401) handleAuthError();
+    if (res.response.status === 401 && requestOptions?.redirectOn401 !== false) handleAuthError();
 
     // Surface server-level error details when openapi-fetch exposes them.
     if (!res.response.ok) {
@@ -129,10 +141,18 @@ export async function request<P extends PostPaths>(
     return res.data as PostSuccessResponse<P>;
 }
 
+/** Convenience wrapper for POST endpoints with no request body. */
+export function requestWithoutBody<P extends PostPaths>(
+    path: P,
+    options?: RequestOptions,
+): Promise<PostSuccessResponse<P>> {
+    return request(path, options);
+}
+
 // ==================== Auth Helpers ====================
 
 export async function login(username: string, password: string): Promise<void> {
-    await request(apiRoutes.login, { username, password });
+    await request(apiRoutes.login, { username, password }, { redirectOn401: false });
 }
 
 export async function logout(): Promise<void> {
